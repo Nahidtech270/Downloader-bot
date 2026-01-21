@@ -1,152 +1,180 @@
-import telebot
-import yt_dlp
 import os
-import requests
-from bs4 import BeautifulSoup
 import time
-import shutil
+import math
+import asyncio
+import requests
+import yt_dlp
+from bs4 import BeautifulSoup
+from pyrogram import Client, filters
+from pyrogram.types import Message
 
 # ==========================================
-# কনফিগারেশন সেকশন
+# কনফিগারেশন (অবশ্যই পূরণ করবেন)
 # ==========================================
-BOT_TOKEN = '8437509974:AAFEVweRFb653-PlahAgAYUcFFAJY_OYcyc'  # আপনার বটের টোকেন এখানে দিন
+BOT_TOKEN = "8437509974:AAFEVweRFb653-PlahAgAYUcFFAJY_OYcyc"
+API_ID = 29462738  # আপনার API ID (সংখ্যা)
+API_HASH = "297f51aaab99720a09e80273628c3c24" # আপনার API HASH (টেক্সট)
+
 DOWNLOAD_FOLDER = "downloads"
 
-# বট ইনিশিলাইজেশন
-bot = telebot.TeleBot(BOT_TOKEN)
+# বট সেটআপ (Pyrogram)
+app = Client(
+    "my_video_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
-# ফোল্ডার না থাকলে তৈরি করে নেবে
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
 # ==========================================
-# হেল্পার ফাংশন: পেজ থেকে ভিডিও লিংক খোঁজা (Smart Detection)
+# হেল্পার ১: ফরম্যাটেড সাইজ (MB/GB)
+# ==========================================
+def human_readable_size(size, decimal_places=2):
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            return f"{size:.{decimal_places}f} {unit}"
+        size /= 1024.0
+    return f"{size:.{decimal_places}f} PB"
+
+# ==========================================
+# হেল্পার ২: এমবেডেড ভিডিও খোঁজা (GilliTV ফিক্স)
 # ==========================================
 def find_embedded_video(url):
-    """
-    এই ফাংশনটি GilliTV বা ব্লগের মতো সাইটে লুকানো ভিডিও লিংক খুঁজে বের করে।
-    """
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        response = requests.get(url, headers=headers)
+        if any(x in url for x in ["youtube.com", "youtu.be", "dailymotion.com"]):
+            return url
+        
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # ১. সরাসরি iframe খোঁজা
             iframes = soup.find_all('iframe')
             for iframe in iframes:
                 src = iframe.get('src')
-                # পরিচিত ভিডিও প্লেয়ার ফিল্টার করা
                 if src and any(x in src for x in ['dailymotion', 'youtube', 'vidoza', 'streamtape', 'ok.ru']):
-                    if src.startswith('//'): 
-                        return 'https:' + src
-                    return src
-    except Exception as e:
-        print(f"Error scraping: {e}")
-    
-    return url  # কিছু না পেলে মেইন লিংকটাই ফেরত দেবে
+                    return 'https:' + src if src.startswith('//') else src
+    except:
+        pass
+    return url
 
 # ==========================================
-# প্রোগ্রেস হুক (Progress Bar)
+# প্রোগ্রেস বার (আপলোডের সময় দেখাবে)
 # ==========================================
-def progress_hook(d):
-    if d['status'] == 'downloading':
-        print(f"Downloading: {d['_percent_str']} complete")
+async def progress(current, total, message, start_time, status_text):
+    now = time.time()
+    diff = now - start_time
+    
+    # প্রতি ৫ সেকেন্ডে একবার এডিট করবে
+    if round(diff % 5.00) == 0 or current == total:
+        percentage = current * 100 / total
+        speed = current / diff if diff > 0 else 0
+        elapsed_time = round(diff) * 1000
+        time_to_completion = round((total - current) / speed) * 1000 if speed > 0 else 0
+        estimated_total_time = elapsed_time + time_to_completion
+
+        # প্রোগ্রেস বার ডিজাইন
+        progress_str = "[{0}{1}]".format(
+            ''.join(["●" for i in range(math.floor(percentage / 10))]),
+            ''.join(["○" for i in range(10 - math.floor(percentage / 10))])
+        )
+
+        tmp = (
+            f"{status_text}\n"
+            f"{progress_str} **{round(percentage, 2)}%**\n\n"
+            f"📦 **Size:** {human_readable_size(current)} / {human_readable_size(total)}\n"
+            f"🚀 **Speed:** {human_readable_size(speed)}/s\n"
+            f"⏳ **ETA:** {time_to_completion // 1000}s"
+        )
+        try:
+            await message.edit(tmp)
+        except:
+            pass
 
 # ==========================================
-# ভিডিও ডাউনলোড এবং প্রসেসিং ফাংশন
+# মেইন ডাউনলোড লজিক
 # ==========================================
-def download_video(url, message):
-    msg = bot.reply_to(message, "🕵️‍♂️ সাইট অ্যানালাইসিস করা হচ্ছে... অনুগ্রহ করে অপেক্ষা করুন।")
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    await message.reply_text("👋 হ্যালো! আমি ২ জিবি পর্যন্ত ভিডিও ডাউনলোড করতে পারি।\nযেকোনো লিংক দিন।")
+
+@app.on_message(filters.text)
+async def handle_url(client, message):
+    url = message.text.strip()
+    if not url.startswith("http"):
+        await message.reply_text("❌ দয়া করে সঠিক http লিংক দিন।")
+        return
+
+    status_msg = await message.reply_text("🕵️‍♂️ লিংক চেক করা হচ্ছে...")
     
-    # ১. স্মার্ট স্ক্যান: যদি এমবেডেড ভিডিও থাকে তা খুঁজে বের করা
+    # ১. লিংক প্রসেস করা
     target_url = find_embedded_video(url)
-    
-    bot.edit_message_text(f"✅ ভিডিও সোর্স পাওয়া গেছে!\n⬇️ ডাউনলোড শুরু হচ্ছে...\nTarget: {target_url}", chat_id=message.chat.id, message_id=msg.message_id)
+    await status_msg.edit(f"✅ ভিডিও পাওয়া গেছে!\n⬇️ সার্ভারে ডাউনলোড শুরু হচ্ছে...")
 
-    # yt-dlp অপশনস
+    # ২. ডাউনলোডের জন্য yt-dlp সেটআপ
+    video_path = f"{DOWNLOAD_FOLDER}/video_{int(time.time())}.mp4"
+    
     ydl_opts = {
-        'format': 'best[ext=mp4]/best', # সেরা কোয়ালিটি এবং MP4 ফরম্যাট
-        'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-        'noplaylist': True,
-        'progress_hooks': [progress_hook],
+        'format': 'best[ext=mp4]/best',
+        'outtmpl': video_path,
         'quiet': True,
-        'writethumbnail': True, # থাম্বনেইল ডাউনলোড
+        'writethumbnail': True,
     }
 
     try:
+        # ডাউনলোড হচ্ছে... (সার্ভারে)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # ভিডিওর ইনফরমেশন বের করা
             info = ydl.extract_info(target_url, download=True)
-            
-            video_title = info.get('title', 'Unknown Video')
-            video_path = ydl.prepare_filename(info)
+            video_title = info.get('title', 'Downloaded Video')
             duration = info.get('duration', 0)
             width = info.get('width', 0)
             height = info.get('height', 0)
             
-            # ফাইল সাইজ চেক (Telegram Limit Check)
-            file_size = os.path.getsize(video_path)
-            file_size_mb = file_size / (1024 * 1024)
-            
-            # নোট: লোকাল সার্ভার ছাড়া ৫০MB এর বেশি আপলোড হবে না
-            if file_size_mb > 49: 
-                bot.edit_message_text(f"⚠️ ভিডিওটি ডাউনলোড হয়েছে কিন্তু সাইজ ({file_size_mb:.2f} MB) টেলিগ্রাম বটের সাধারণ লিমিট (50MB) এর চেয়ে বেশি।\n\nবড় ফাইল পাঠাতে হলে 'Local Bot API Server' কনফিগার করতে হবে।", chat_id=message.chat.id, message_id=msg.message_id)
-                # ফাইলটি ডিলিট করে দিচ্ছি সার্ভার ক্লিন রাখার জন্য
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-                return
-
-            # টেলিগ্রামে আপলোড
-            bot.edit_message_text("⬆️ টেলিগ্রামে আপলোড করা হচ্ছে...", chat_id=message.chat.id, message_id=msg.message_id)
-            
-            with open(video_path, 'rb') as video_file:
-                bot.send_video(
-                    message.chat.id, 
-                    video_file, 
-                    caption=f"🎬 **{video_title}**\n\n✅ Downloaded by Bot", 
-                    parse_mode="Markdown",
-                    duration=duration,
-                    width=width,
-                    height=height,
-                    supports_streaming=True
-                )
-            
-            # সফল মেসেজ এবং ক্লিনআপ
-            bot.delete_message(message.chat.id, msg.message_id)
-            bot.reply_to(message, "✅ ভিডিও সফলভাবে পাঠানো হয়েছে!")
-            
-            # ফাইল মুছে ফেলা (স্টোরেজ সেভ করার জন্য)
+            # আসল ভিডিও পাথ এবং থাম্বনেইল পাথ আপডেট
             if os.path.exists(video_path):
-                os.remove(video_path)
-                # থাম্বনেইল থাকলে সেটাও ডিলিট করা
-                thumb_path = video_path.rsplit('.', 1)[0] + ".jpg"
-                if os.path.exists(thumb_path):
-                    os.remove(thumb_path)
-                elif os.path.exists(video_path.rsplit('.', 1)[0] + ".webp"):
-                     os.remove(video_path.rsplit('.', 1)[0] + ".webp")
+                final_path = video_path
+            else:
+                # yt-dlp নাম চেঞ্জ করলে সেটা ধরা
+                final_path = ydl.prepare_filename(info)
+
+            thumb_path = None
+            possible_thumb = final_path.rsplit('.', 1)[0] + ".jpg"
+            if os.path.exists(possible_thumb):
+                thumb_path = possible_thumb
+            
+            # ফাইলের সাইজ দেখা
+            file_size = os.path.getsize(final_path)
+            await status_msg.edit(f"⬇️ ডাউনলোড সম্পন্ন!\n📦 সাইজ: {human_readable_size(file_size)}\n⬆️ এখন টেলিগ্রামে আপলোড হচ্ছে...")
+
+            # ৩. টেলিগ্রামে আপলোড (Pyrogram দিয়ে - ২ জিবি সাপোর্ট)
+            start_time = time.time()
+            await app.send_video(
+                chat_id=message.chat.id,
+                video=final_path,
+                caption=f"🎬 **{video_title}**\n\n✅ Downloaded via Bot",
+                duration=duration,
+                width=width,
+                height=height,
+                thumb=thumb_path,
+                supports_streaming=True,
+                progress=progress,
+                progress_args=(status_msg, start_time, "⬆️ **আপলোড হচ্ছে (Cloud)...**")
+            )
+
+            # কাজ শেষ হলে ক্লিনআপ
+            await status_msg.delete()
+            if os.path.exists(final_path): os.remove(final_path)
+            if thumb_path and os.path.exists(thumb_path): os.remove(thumb_path)
+            
+            await message.reply_text("✅ কাজ সম্পন্ন!")
 
     except Exception as e:
-        bot.edit_message_text(f"❌ এরর হয়েছে: {str(e)}", chat_id=message.chat.id, message_id=msg.message_id)
-        print(e)
+        await status_msg.edit(f"❌ এরর হয়েছে: {str(e)}")
+        # এরর হলেও ফাইল ডিলিট করা
+        if 'final_path' in locals() and os.path.exists(final_path):
+            os.remove(final_path)
 
-# ==========================================
-# মেসেজ হ্যান্ডলার
-# ==========================================
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "👋 হ্যালো! আমি একটি অ্যাডভান্সড ভিডিও ডাউনলোডার।\n\nযেকোনো নাটক বা সিরিজের লিংক দিন (যেমন: GilliTV), আমি ভিডিও খুঁজে বের করে ডাউনলোড করে দেব।")
-
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    url = message.text.strip()
-    
-    if url.startswith("http"):
-        download_video(url, message)
-    else:
-        bot.reply_to(message, "দয়া করে একটি সঠিক লিংক দিন (http বা https দিয়ে শুরু)।")
-
-# বট চালু রাখা
-print("🤖 Bot is running...")
-bot.infinity_polling()
+# বট রান করা
+print("🤖 Pyrogram Bot Started...")
+app.run()
