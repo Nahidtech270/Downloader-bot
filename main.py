@@ -13,7 +13,7 @@ import tarfile
 from datetime import datetime
 
 # ==========================================
-# 🛠 ১. অটোমেটিক ডিপেন্ডেন্সি ও টুলস ইনস্টলার (FIXED)
+# 🛠 ১. অটোমেটিক ডিপেন্ডেন্সি ও টুলস ইনস্টলার
 # ==========================================
 print("⚙️ System Checking & Installing Dependencies...")
 
@@ -28,7 +28,7 @@ required_packages = ["pyrogram", "tgcrypto", "yt_dlp", "requests", "bs4", "image
 for pkg in required_packages:
     install_and_import(pkg)
 
-# 👇 Aria2c অটোমেটিক সেটআপ (User-Agent ফিক্স করা হয়েছে)
+# 👇 Aria2c অটোমেটিক সেটআপ (Fixed for GitHub Block)
 ARIA2_BIN_PATH = os.path.join(os.getcwd(), "aria2c")
 
 def install_aria2_static():
@@ -36,7 +36,6 @@ def install_aria2_static():
         print("✅ Aria2c already exists.")
         return ARIA2_BIN_PATH
     
-    # সিস্টেমে আগে থেকেই আছে কিনা চেক
     aria_sys = shutil.which("aria2c")
     if aria_sys:
         print(f"✅ Found System Aria2c at: {aria_sys}")
@@ -44,7 +43,7 @@ def install_aria2_static():
 
     print("🚀 Downloading Aria2c Static Binary...")
     try:
-        # 🔥 GitHub ব্লক এড়াতে User-Agent যোগ করা হলো
+        # User-Agent যোগ করা হয়েছে যাতে GitHub ব্লক না করে
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         url = "https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2"
         
@@ -102,10 +101,10 @@ FAKE_HEADERS = {
 
 try:
     FFMPEG_LOCATION = imageio_ffmpeg.get_ffmpeg_exe()
+    print(f"✅ FFmpeg found at: {FFMPEG_LOCATION}")
 except Exception:
     FFMPEG_LOCATION = "ffmpeg"
 
-# 🔥 Superfast Client Config
 app = Client(
     "ultimate_bot", 
     api_id=API_ID, 
@@ -133,126 +132,117 @@ if not os.path.exists(DOWNLOAD_FOLDER):
 # ==========================================
 # 🛠 হেল্পার ফাংশন
 # ==========================================
-def smart_update_ytdlp():
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"])
-        return True
-    except: return False
-
 def human_readable_size(size):
-    if not size: return "Unknown"
+    if not size: return "0 B"
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if size < 1024.0: return f"{size:.2f} {unit}"
         size /= 1024.0
     return f"{size:.2f} PB"
 
 def time_formatter(seconds):
-    if not seconds: return "..."
+    if not seconds or seconds < 0: return "..."
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     if h: return f"{h}h {m}m {s}s"
     return f"{m}m {s}s"
 
 def clean_filename(name):
-    # ফাইলের নাম খুব বড় হলে সমস্যা হতে পারে, তাই লিমিট করা হলো
     clean = re.sub(r'[\\/*?:"<>|]', '', name).strip()
     return clean[:200] 
 
 # ==========================================
-# 💾 ডাইরেক্ট ডাউনলোড হেল্পার
+# 📥 ভিজুয়াল প্রোগ্রেস বার (Manual Calculation)
 # ==========================================
-async def direct_download(url, file_path, message, task_id):
-    async with aiohttp.ClientSession(headers=FAKE_HEADERS) as session:
-        try:
-            async with session.get(url) as response:
-                if response.status not in [200, 206]:
-                    raise Exception(f"HTTP Error {response.status}")
-                
-                total_size = int(response.headers.get('content-length', 0))
-                downloaded = 0
-                start_time = time.time()
-
-                with open(file_path, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(5 * 1024 * 1024): # 5MB Chunk for Speed
-                        if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED")
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            
-                            now = time.time()
-                            if (now - LAST_UPDATE_TIME.get(task_id, 0)) >= 4:
-                                LAST_UPDATE_TIME[task_id] = now
-                                percentage = downloaded * 100 / total_size if total_size > 0 else 0
-                                speed = downloaded / (now - start_time) if (now - start_time) > 0 else 0
-                                await update_progress(message, percentage, downloaded, total_size, speed, "⬇️ Direct Downloading...")
-
-        except Exception as e: raise e
-
-# ==========================================
-# 📥 প্রোগ্রেস আপডেট ফাংশন
-# ==========================================
-async def update_progress(message, percentage, current, total, speed, status_text):
+async def update_progress(message, percentage, current, total, speed, status_text, task_id):
+    now = time.time()
+    # ৪ সেকেন্ডের আগে আপডেট করবে না (Telegram Limit)
+    if (now - LAST_UPDATE_TIME.get(task_id, 0)) < 4: 
+        return
+    
+    LAST_UPDATE_TIME[task_id] = now
+    
     filled = int(percentage // 10)
     bar = "▰" * filled + "▱" * (10 - filled)
+    
     speed_txt = human_readable_size(speed) + "/s"
-    text = (f"{status_text}\n[{bar}] **{percentage:.1f}%**\n\n"
-            f"📦 `{human_readable_size(current)} / {human_readable_size(total)}`\n"
-            f"🚀 `{speed_txt}`")
+    eta_txt = "..."
+    if speed > 0:
+        eta = (total - current) / speed
+        eta_txt = time_formatter(eta)
+
+    text = (
+        f"{status_text}\n"
+        f"[{bar}] **{percentage:.1f}%**\n\n"
+        f"📦 **Size:** `{human_readable_size(current)} / {human_readable_size(total)}`\n"
+        f"🚀 **Speed:** `{speed_txt}`\n"
+        f"⏳ **ETA:** `{eta_txt}`"
+    )
+    
     try:
         await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]]))
     except: pass
 
+# ==========================================
+# 📥 yt-dlp Hook (Fixed for Aria2)
+# ==========================================
 def yt_dlp_hook(d, message, client, task_id):
     if d['status'] == 'downloading':
-        now = time.time()
-        if (now - LAST_UPDATE_TIME.get(task_id, 0)) < 4: return
-        LAST_UPDATE_TIME[task_id] = now
-        
         if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED")
-
+        
         total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
         current = d.get('downloaded_bytes', 0)
-        speed = d.get('speed') or 0
+        
+        # Aria2 মাঝে মাঝে স্পিড দেয় না, তাই ম্যানুয়াল ক্যালকুলেশন
+        speed = d.get('speed')
+        if not speed:
+            start_time = d.get('start_time') or time.time()
+            elapsed = time.time() - start_time
+            if elapsed > 0: speed = current / elapsed
+            else: speed = 0
+
         percentage = current * 100 / total if total > 0 else 0
         
-        client.loop.create_task(update_progress(message, percentage, current, total, speed, "⬇️ Aria2c Downloading..."))
+        # 🔥 ভিজুয়াল স্ট্যাটাস
+        status_text = "⬇️ **Downloading (⚡ Aria2c Engine)...**\n🚀 `Using 16x Parallel Connections`"
+        
+        client.loop.create_task(update_progress(message, percentage, current, total, speed, status_text, task_id))
 
 async def upload_hook(current, total, message, start_time, task_id):
     if CANCEL_EVENTS.get(task_id): app.stop_transmission(); return
+    
     now = time.time()
-    if (now - start_time) % 4 < 0.5 or current == total:
-        speed = current / (now - start_time) if (now - start_time) > 0 else 0
-        percentage = current * 100 / total
-        await update_progress(message, percentage, current, total, speed, "⬆️ Fast Uploading...")
+    elapsed = now - start_time
+    speed = current / elapsed if elapsed > 0 else 0
+    percentage = current * 100 / total
+    
+    status_text = "⬆️ **Uploading to Telegram...**"
+    await update_progress(message, percentage, current, total, speed, status_text, task_id)
 
 # ==========================================
-# 🕵️‍♂️ URL ডিটেক্টর
+# 🕵️‍♂️ URL ডিটেক্টর (Anti-Freeze Logic)
 # ==========================================
 def get_target_url(url):
-    # কিছু সাইটের জন্য ডাইরেক্ট লিঙ্ক ডিটেকশন
     direct_list = ["youtube", "youtu.be", "facebook", "instagram", "tiktok"]
     if any(x in url for x in direct_list): return url
-    
     try:
-        # রিডাইরেক্ট চেক
         r = requests.get(url, headers=FAKE_HEADERS, timeout=5, allow_redirects=True)
         return r.url
     except: return url
 
 # ==========================================
-# 📨 মেইন লজিক
+# 📨 মেইন লজিক (Updated)
 # ==========================================
 @app.on_message(filters.text & ~filters.command(["start", "help"]))
 async def text_handler(client, message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Rename Check
+    # Rename Logic
     if chat_id in USER_STATE and USER_STATE[chat_id]['state'] == 'waiting_name':
         task_id = USER_STATE[chat_id]['task_id']
         custom_name = clean_filename(text)
         msg_to_edit = USER_STATE[chat_id]['msg']
-        await msg_to_edit.edit(f"📝 **Name Set:** `{custom_name}`\n♻️ **Starting...**")
+        await msg_to_edit.edit(f"📝 **Name Set:** `{custom_name}`\n♻️ **Starting Engine...**")
         del USER_STATE[chat_id]
         
         task_info = TASK_STORE[task_id]
@@ -263,28 +253,40 @@ async def text_handler(client, message):
         await message.reply("❌ Invalid Link")
         return
 
-    status_msg = await message.reply("🕵️‍♂️ **Processing Link...**")
+    status_msg = await message.reply("🕵️‍♂️ **Analyzing Link...**")
     task_id = str(uuid.uuid4())[:8]
 
     try:
         target_url = await asyncio.to_thread(get_target_url, text)
         is_direct = False
         info = {}
-
-        ydl_opts = {
-            'quiet': True, 'no_warnings': True,
-            'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-            'user_agent': FAKE_HEADERS['User-Agent'],
-            'http_headers': FAKE_HEADERS,
-        }
-
-        # yt-dlp info extract
-        try:
-            info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False))
-        except Exception as e:
-            # Fallback to Direct Mode
+        
+        # 🔥 Anti-Freeze Check: গুগল বা বড় লিংকের জন্য সরাসরি ডাউনলোড
+        if "googleusercontent.com" in target_url or len(target_url) > 300:
+            print("⚠️ Detected Large/Direct Link - Skipping Info Extract")
             is_direct = True
-            info = {'title': 'Direct_Download', 'formats': []}
+            info = {'title': 'Direct_Video_File', 'formats': []}
+        else:
+            ydl_opts = {
+                'quiet': True, 'no_warnings': True,
+                'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
+                'user_agent': FAKE_HEADERS['User-Agent'],
+                'http_headers': FAKE_HEADERS,
+            }
+            try:
+                # 🔥 ১০ সেকেন্ডের বেশি সময় নিলে Timeout দেবে
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False)),
+                    timeout=10 
+                )
+            except asyncio.TimeoutError:
+                print("⚠️ Info Extract Timed Out! Switching to Direct Mode.")
+                is_direct = True
+                info = {'title': 'Direct_Download', 'formats': []}
+            except Exception as e:
+                print(f"⚠️ Info Extract Error: {e}")
+                is_direct = True
+                info = {'title': 'Direct_Download', 'formats': []}
 
         title = info.get('title', 'Video')
         formats = info.get('formats', [])
@@ -299,7 +301,7 @@ async def text_handler(client, message):
             if row: buttons.append(row)
             buttons.append([InlineKeyboardButton("🎵 Audio Only", callback_data=f"q_{task_id}_aud_0")])
         else:
-            buttons.append([InlineKeyboardButton("⬇️ Force Download (Direct)", callback_data=f"q_{task_id}_dir_best")])
+            buttons.append([InlineKeyboardButton("⬇️ Fast Download (Direct)", callback_data=f"q_{task_id}_dir_best")])
 
         buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="close")])
 
@@ -339,16 +341,16 @@ async def callback_handler(client, query: CallbackQuery):
         if query.message.chat.id in USER_STATE: del USER_STATE[query.message.chat.id]
         
         info = TASK_STORE[task_id]
-        await query.message.edit(f"♻️ **Initializing...**")
+        await query.message.edit(f"♻️ **Initializing Engine...**")
         asyncio.create_task(run_download_upload(client, query.message, info['url'], info['mode'], info['res'], task_id, None))
 
 # ==========================================
-# 🚀 সুপারফাস্ট ইঞ্জিন (Aria2 Tuned)
+# 🚀 সুপারফাস্ট ইঞ্জিন (Aria2 Tuned + Visuals)
 # ==========================================
 async def run_download_upload(client, message, url, mode, res, task_id, custom_name):
     async with semaphore:
         temp_dir = f"{DOWNLOAD_FOLDER}/{task_id}"
-        if os.path.exists(temp_dir): shutil.rmtree(temp_dir) # Clean start
+        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
         os.makedirs(temp_dir)
         
         CANCEL_EVENTS[task_id] = False
@@ -359,61 +361,65 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
 
         try:
             if mode == 'dir':
-                await message.edit("⬇️ **Direct Downloading...**")
-                final_path = f"{temp_dir}/{file_name}.mp4"
-                await direct_download(url, final_path, message, task_id)
+                await message.edit("⬇️ **Processing Direct Link...**")
             else:
-                await message.edit("🚀 **Downloading (Aria2c Engine)...**")
-                out_templ = f"{temp_dir}/{file_name}.%(ext)s"
+                await message.edit("🚀 **Starting Aria2c Engine...**")
+            
+            out_templ = f"{temp_dir}/{file_name}.%(ext)s"
+            
+            # 🔥 ARIA2 CONFIGURATION (FIXED FRAGMENT ERRORS)
+            ydl_opts = {
+                'outtmpl': out_templ,
+                'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
+                'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
+                'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
+                'http_headers': FAKE_HEADERS,
+                'progress_hooks': [lambda d: yt_dlp_hook(d, message, client, task_id)],
                 
-                # 🔥 ARIA2 CONFIGURATION (CRITICAL FIX FOR FRAGMENT ERRORS)
-                ydl_opts = {
-                    'outtmpl': out_templ,
-                    'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
-                    'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-                    'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
-                    'http_headers': FAKE_HEADERS,
-                    'progress_hooks': [lambda d: yt_dlp_hook(d, message, client, task_id)],
-                    # 👇 এই সেটিংসগুলো ফিক্স করা হয়েছে
-                    'external_downloader': ARIA2_EXECUTABLE,
-                    'external_downloader_args': [
-                        '-x', '16',    # ১৬টি কানেকশন
-                        '-k', '10M',   # 🔥 FIX: 1MB এর বদলে 10MB (ডিস্ক এরর কমাবে)
-                        '-s', '16',
-                        '--min-split-size=10M'
-                    ] if ARIA2_EXECUTABLE else []
-                }
-                
-                if mode == "aud":
-                    ydl_opts['format'] = 'bestaudio/best'
-                    ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
-                else:
-                    ydl_opts['format'] = f"bestvideo[height<={res}]+bestaudio/best" if res != "best" else "best"
-                    ydl_opts['postprocessors'] = [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}]
+                # 👇 ডিস্ক এরর ফিক্স করতে 10MB স্প্লিট সাইজ দেওয়া হয়েছে
+                'external_downloader': ARIA2_EXECUTABLE,
+                'external_downloader_args': [
+                    '-x', '16',    # 16 Connections
+                    '-k', '10M',   # 10MB Split Size (Prevents too many open files)
+                    '-s', '16',
+                    '--min-split-size=10M'
+                ] if ARIA2_EXECUTABLE else []
+            }
+            
+            if mode == "aud":
+                ydl_opts['format'] = 'bestaudio/best'
+                ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]
+            elif mode != 'dir':
+                ydl_opts['format'] = f"bestvideo[height<={res}]+bestaudio/best" if res != "best" else "best"
+                ydl_opts['postprocessors'] = [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}]
 
-                def run_dl():
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=True)
-                        return ydl.prepare_filename(info), info
-                
-                temp_path, info = await asyncio.to_thread(run_dl)
-                final_path = temp_path
-                
-                # এক্সটেনশন চেক
-                base, ext = os.path.splitext(temp_path)
-                if mode == "aud" and ext != ".mp3": final_path = base + ".mp3"
-                elif mode == "vid" and ext != ".mp4": final_path = base + ".mp4"
-                
-                if not os.path.exists(final_path): final_path = temp_path # যদি কনভার্ট না হয়
+            def run_dl():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    return ydl.prepare_filename(info), info
+            
+            # 🔥 Download Timeout Limit (3 Hours)
+            try:
+                temp_path, info = await asyncio.wait_for(asyncio.to_thread(run_dl), timeout=10800)
+            except asyncio.TimeoutError:
+                raise Exception("Download Limit Exceeded (3 Hours)")
 
-                thumb_path = base + ".jpg"
-                if not os.path.exists(thumb_path): thumb_path = base + ".webp"
-                if not os.path.exists(thumb_path): thumb_path = None
-                duration = int(info.get('duration', 0))
+            final_path = temp_path
+            
+            # Extension Check
+            base, ext = os.path.splitext(temp_path)
+            if mode == "aud" and ext != ".mp3": final_path = base + ".mp3"
+            elif mode == "vid" and ext != ".mp4": final_path = base + ".mp4"
+            
+            if not os.path.exists(final_path): final_path = temp_path 
+
+            thumb_path = base + ".jpg"
+            if not os.path.exists(thumb_path): thumb_path = base + ".webp"
+            if not os.path.exists(thumb_path): thumb_path = None
+            duration = int(info.get('duration', 0))
 
             if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED")
             
-            # সাইজ চেক
             if os.path.exists(final_path) and os.path.getsize(final_path) > 2 * 1024 * 1024 * 1024:
                 await message.edit("❌ **File > 2GB (Telegram Limit).**")
                 return
@@ -443,7 +449,7 @@ async def cookie_handler(c, m):
 
 @app.on_message(filters.command("start"))
 async def start(c, m): 
-    await m.reply("👋 **Superfast Bot Ready!**\n\n✅ Aria2c Engine: ON\n✅ Auto-Resume: ON\n\nSend Link -> Select Quality -> Enjoy!")
+    await m.reply("👋 **Superfast Bot Ready!**\n\n✅ Aria2c Engine: ON\n✅ Google Link Bypass: ON\n🚀 Speed: Max (16x)\n\nSend Link -> Enjoy!")
 
-print("🔥 Bot Started with Optimized Aria2 Engine...")
+print("🔥 Bot Started with All Fixes...")
 app.run()
