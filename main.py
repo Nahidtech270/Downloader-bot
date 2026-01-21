@@ -16,6 +16,7 @@ API_ID = 29462738
 API_HASH = "297f51aaab99720a09e80273628c3c24"
 
 DOWNLOAD_FOLDER = "downloads"
+COOKIE_FILE = "cookies.txt"  # কুকিজ ফাইলের নাম
 
 # লগিং
 logging.basicConfig(level=logging.INFO)
@@ -102,32 +103,29 @@ async def progress(current, total, message, start_time, status_text):
 # ==========================================
 async def download_worker(url, message, status_msg):
     target_url = await asyncio.to_thread(get_target_url, url)
-    await status_msg.edit(f"✅ লিংক প্রসেসিং...\n⬇️ ডাউনলোড শুরু হচ্ছে...")
+    await status_msg.edit(f"✅ সোর্স প্রসেসিং...\n⬇️ ডাউনলোড শুরু হচ্ছে...")
 
     timestamp = int(time.time())
     out_templ = f"{DOWNLOAD_FOLDER}/video_{timestamp}.%(ext)s"
 
-    # ---------------------------------------------------------
-    # আপডেট: YouTube এরর ফিক্স এবং FB/Insta সেটিংস
-    # ---------------------------------------------------------
+    # yt-dlp কনফিগারেশন
     ydl_opts = {
         'format': 'best[ext=mp4]/best', 
         'outtmpl': out_templ,
         'quiet': False,
         'no_warnings': False,
         'nocheckcertificate': True,
-        'source_address': '0.0.0.0', # Force IPv4 (অনেক সময় IPv6 ব্লক থাকে)
-        
-        # YouTube 429 Error Fix (iOS Client ব্যবহার করা)
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'web_creator', 'android_creator']
-            }
-        },
-        
-        # Facebook/Instagram এর জন্য ব্রাউজার সাজা
-        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+        'source_address': '0.0.0.0', 
+        # ফেইসবুক/ইনস্টাগ্রাম ইউজার এজেন্ট
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     }
+
+    # কুকিজ ফাইল থাকলে সেটা ব্যবহার করবে (YouTube Fix)
+    if os.path.exists(COOKIE_FILE):
+        ydl_opts['cookiefile'] = COOKIE_FILE
+    else:
+        # কুকিজ না থাকলে সাধারণ অ্যান্ড্রয়েড ক্লায়েন্ট চেষ্টা করবে
+        ydl_opts['extractor_args'] = {'youtube': {'player_client': ['android', 'web']}}
 
     try:
         def run_yt_dlp():
@@ -147,10 +145,9 @@ async def download_worker(url, message, status_msg):
              return
 
         file_size = os.path.getsize(file_path)
-        await status_msg.edit(f"⬇️ ডাউনলোড সম্পন্ন!\n📦 সাইজ: {human_readable_size(file_size)}\n⬆️ টেলিগ্রামে আপলোড হচ্ছে...")
+        await status_msg.edit(f"⬇️ ডাউনলোড কমপ্লিট!\n📦 সাইজ: {human_readable_size(file_size)}\n⬆️ আপলোড হচ্ছে...")
 
         start_time = time.time()
-        
         thumb_path = None
         possible_thumb = file_path.rsplit('.', 1)[0] + ".jpg"
         if os.path.exists(possible_thumb):
@@ -175,30 +172,49 @@ async def download_worker(url, message, status_msg):
 
     except Exception as e:
         err = str(e)
-        if "Too Many Requests" in err or "429" in err:
-            err = "❌ YouTube সার্ভার আইপি ব্লক করেছে (429 Error)। পরে চেষ্টা করুন।"
-        elif "Sign in" in err:
-            err = "❌ YouTube সাইন-ইন চাচ্ছে (Cookies Required)।"
+        if "Sign in" in err or "429" in err:
+            await status_msg.edit(
+                "❌ **YouTube এরর:** সার্ভার আইপি ব্লকড।\n\n"
+                "⚠️ **সমাধান:** আপনাকে একটি `cookies.txt` ফাইল পাঠাতে হবে।\n"
+                "১. পিসিতে 'Get cookies.txt LOCALLY' এক্সটেনশন দিয়ে ইউটিউব কুকিজ ডাউনলোড করুন।\n"
+                "২. ফাইলের নাম `cookies.txt` রেখে এই চ্যাটে আপলোড করুন।"
+            )
+        else:
+            await status_msg.edit(f"❌ এরর: `{err[:200]}...`")
         
-        await status_msg.edit(f"❌ এরর: `{err[:200]}...`")
         logger.error(f"Error: {e}")
-        
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
 
 # ==========================================
-# ৫. হ্যান্ডলার
+# ৫. কুকিজ ফাইল রিসিভ করার হ্যান্ডলার (নতুন)
 # ==========================================
-@app.on_message(filters.command("start"))
-async def start(client, message):
-    await message.reply_text("👋 Universal Downloader V4 (YouTube Fix)\nলিংক দিন।")
+@app.on_message(filters.document)
+async def handle_cookies(client, message):
+    if message.document.file_name == "cookies.txt":
+        await message.download(file_name=COOKIE_FILE)
+        await message.reply("✅ **Cookies সেট করা হয়েছে!**\nএখন ইউটিউব ডাউনলোড করার চেষ্টা করুন।")
+    else:
+        # অন্য কোনো ডকুমেন্ট আসলে ইগনোর করবে বা বলতে পারেন
+        pass
 
+# ==========================================
+# ৬. টেক্সট হ্যান্ডলার
+# ==========================================
 @app.on_message(filters.text)
 async def handle_url(client, message):
     url = message.text.strip()
-    if not url.startswith("http"): return
+    
+    if message.text == "/start":
+        await message.reply("👋 Universal Downloader!\nলিংক দিন। যদি ইউটিউবে সমস্যা হয়, তবে `cookies.txt` ফাইল আপলোড করুন।")
+        return
+
+    if not url.startswith("http"):
+        await message.reply("❌ দয়া করে সঠিক লিংক দিন।") 
+        return
+
     msg = await message.reply_text("🕵️‍♂️ প্রসেসিং...")
     asyncio.create_task(download_worker(url, message, msg))
 
-print("🤖 Bot Started with iOS Client Spoofing...")
+print("🤖 Bot Started (with Cookie Support)...")
 app.run()
