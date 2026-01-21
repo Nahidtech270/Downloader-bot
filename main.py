@@ -17,16 +17,17 @@ API_HASH = "297f51aaab99720a09e80273628c3c24" # আপনার API HASH দি�
 
 DOWNLOAD_FOLDER = "downloads"
 
-# লগিং সেটআপ (টার্মিনালে এরর দেখার জন্য)
+# লগিং কনফিগারেশন
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# বট সেটআপ
+# বট সেটআপ (In-Memory সেশন সহ - Disk I/O Error সমাধানের জন্য)
 app = Client(
     "my_video_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN
+    bot_token=BOT_TOKEN,
+    in_memory=True  # <--- এটি সার্ভার ক্র্যাশ আটকাবে
 )
 
 if not os.path.exists(DOWNLOAD_FOLDER):
@@ -43,17 +44,13 @@ def human_readable_size(size, decimal_places=2):
     return f"{size:.{decimal_places}f} PB"
 
 # ==========================================
-# ২. উন্নত এমবেডেড ভিডিও খোঁজা (GilliTV Fix)
+# ২. এমবেডেড ভিডিও খোঁজা (GilliTV Fix)
 # ==========================================
 def find_embedded_video(url):
-    """
-    GilliTV এবং এই ধরনের সাইট থেকে আসল ভিডিও লিংক বের করার উন্নত ফাংশন
-    """
-    # যদি আগে থেকেই ডাইরেক্ট লিংক হয়
+    # যদি ডাইরেক্ট লিংক হয়
     if any(x in url for x in ["youtube.com", "youtu.be", "dailymotion.com", "streamtape.com"]):
         return url
         
-    logger.info(f"Scraping URL: {url}")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -62,24 +59,19 @@ def find_embedded_video(url):
         response = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # পদ্ধতি ১: iframe খোঁজা
         iframes = soup.find_all('iframe')
         for iframe in iframes:
             src = iframe.get('src')
             if src:
-                # পরিচিত প্লেয়ার লিস্ট
                 if any(domain in src for domain in ['dailymotion', 'youtube', 'vidoza', 'streamtape', 'ok.ru', 'vk.com']):
-                    final_url = 'https:' + src if src.startswith('//') else src
-                    logger.info(f"Found Iframe: {final_url}")
-                    return final_url
-
+                    return 'https:' + src if src.startswith('//') else src
     except Exception as e:
         logger.error(f"Scraping Error: {e}")
     
-    return url # কিছু না পেলে যা আছে তাই ফেরত দেবে
+    return url
 
 # ==========================================
-# ৩. প্রোগ্রেস বার (টেলিগ্রামের জন্য)
+# ৩. প্রোগ্রেস বার
 # ==========================================
 async def progress(current, total, message, start_time, status_text):
     now = time.time()
@@ -88,7 +80,6 @@ async def progress(current, total, message, start_time, status_text):
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
-        time_to_completion = round((total - current) / speed) * 1000 if speed > 0 else 0
         
         progress_str = "[{0}{1}]".format(
             ''.join(["●" for i in range(math.floor(percentage / 10))]),
@@ -107,28 +98,24 @@ async def progress(current, total, message, start_time, status_text):
             pass
 
 # ==========================================
-# ৪. ডাউনলোড এবং প্রসেসিং (Async Wrapper)
+# ৪. ডাউনলোড লজিক
 # ==========================================
 async def download_worker(url, message, status_msg):
     target_url = await asyncio.to_thread(find_embedded_video, url)
-    
-    await status_msg.edit(f"✅ সোর্স: {target_url}\n⬇️ ডাউনলোড শুরু হচ্ছে... (অপেক্ষা করুন)")
+    await status_msg.edit(f"✅ সোর্স: {target_url}\n⬇️ ডাউনলোড শুরু হচ্ছে...")
 
-    # ফাইলের নাম সেট করা
     timestamp = int(time.time())
     out_templ = f"{DOWNLOAD_FOLDER}/video_{timestamp}.%(ext)s"
 
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'outtmpl': out_templ,
-        'quiet': False, # লগ দেখার জন্য False করা হলো
+        'quiet': False,
         'no_warnings': False,
         'nocheckcertificate': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
     }
 
     try:
-        # ব্লকিং ফাংশন থ্রেডে চালানো
         def run_yt_dlp():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(target_url, download=True)
@@ -136,59 +123,66 @@ async def download_worker(url, message, status_msg):
 
         file_path, info = await asyncio.to_thread(run_yt_dlp)
         
+        # ----------------------------------------------------
+        # এই অংশটিই আপনার এরর ফিক্স করবে (Float to Int)
+        # ----------------------------------------------------
         video_title = info.get('title', 'Video')
-        duration = info.get('duration', 0)
+        duration = int(info.get('duration', 0)) # <--- float কে int করা হলো
+        width = int(info.get('width', 0)) if info.get('width') else 0
+        height = int(info.get('height', 0)) if info.get('height') else 0
         
-        # ফাইল আছে কিনা চেক
         if not os.path.exists(file_path):
-             await status_msg.edit("❌ ডাউনলোড শেষ হয়েছে কিন্তু ফাইল পাওয়া যাচ্ছে না।")
+             await status_msg.edit("❌ ফাইল পাওয়া যাচ্ছে না।")
              return
 
         file_size = os.path.getsize(file_path)
         await status_msg.edit(f"⬇️ ডাউনলোড সম্পন্ন!\n📦 সাইজ: {human_readable_size(file_size)}\n⬆️ আপলোড হচ্ছে...")
 
-        # আপলোড
         start_time = time.time()
+        
+        # থাম্বনেইল হ্যান্ডলিং
+        thumb_path = None
+        possible_thumb = file_path.rsplit('.', 1)[0] + ".jpg"
+        if os.path.exists(possible_thumb):
+            thumb_path = possible_thumb
+
         await app.send_video(
             chat_id=message.chat.id,
             video=file_path,
             caption=f"🎬 **{video_title}**\n💾 Size: {human_readable_size(file_size)}",
             duration=duration,
+            width=width,
+            height=height,
+            thumb=thumb_path,
             supports_streaming=True,
             progress=progress,
             progress_args=(status_msg, start_time, "⬆️ **টেলিগ্রামে আপলোড হচ্ছে...**")
         )
 
-        # ক্লিনআপ
         await status_msg.delete()
         if os.path.exists(file_path): os.remove(file_path)
+        if thumb_path: os.remove(thumb_path)
 
     except Exception as e:
-        error_text = str(e)
-        # এরর মেসেজ ছোট করে দেখানো
-        if len(error_text) > 200: error_text = error_text[:200] + "..."
-        await status_msg.edit(f"❌ এরর হয়েছে:\n`{error_text}`")
-        logger.error(f"Download Failed: {e}")
+        await status_msg.edit(f"❌ এরর: `{str(e)}`")
+        logger.error(f"Error: {e}")
+        # ক্লিনআপ
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
 
 # ==========================================
-# ৫. মেইন হ্যান্ডলার
+# ৫. হ্যান্ডলার
 # ==========================================
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text("👋 হ্যালো! লিংক দিন, আমি ডাউনলোড করে দেব (2GB সাপোর্ট সহ)।")
+    await message.reply_text("👋 হ্যালো! লিংক দিন।")
 
 @app.on_message(filters.text)
 async def handle_url(client, message):
     url = message.text.strip()
-    
-    if not url.startswith("http"):
-        return
-
-    msg = await message.reply_text("🕵️‍♂️ প্রসেসিং শুরু হচ্ছে...")
-    
-    # ব্যাকগ্রাউন্ড টাস্ক হিসেবে শুরু করা
+    if not url.startswith("http"): return
+    msg = await message.reply_text("🕵️‍♂️ প্রসেসিং...")
     asyncio.create_task(download_worker(url, message, msg))
 
-# বট রান
-print("🤖 Bot Started with Verbose Logs...")
+print("🤖 Bot Started...")
 app.run()
