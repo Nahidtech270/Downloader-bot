@@ -9,7 +9,7 @@ import shutil
 # ==========================================
 # কনফিগারেশন সেকশন
 # ==========================================
-BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE'  # আপনার বটের টোকেন এখানে দিন
+BOT_TOKEN = '8437509974:AAFEVweRFb653-PlahAgAYUcFFAJY_OYcyc'  # আপনার বটের টোকেন এখানে দিন
 DOWNLOAD_FOLDER = "downloads"
 
 # বট ইনিশিলাইজেশন
