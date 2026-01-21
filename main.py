@@ -9,21 +9,63 @@ import uuid
 import re
 import subprocess
 import importlib.util
+import stat
+import tarfile
 from datetime import datetime
 
 # ==========================================
-# 🛠 স্মার্ট ডিপেন্ডেন্সি চেকার
+# 🛠 ১. অটোমেটিক ডিপেন্ডেন্সি ও টুলস ইনস্টলার
 # ==========================================
+print("⚙️ System Checking & Installing Dependencies...")
+
 def install_and_import(package):
     try:
         importlib.import_module(package)
     except ImportError:
-        print(f"🔄 Installing missing package: {package}...")
+        print(f"🔄 Installing python package: {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 required_packages = ["pyrogram", "tgcrypto", "yt_dlp", "requests", "bs4", "imageio_ffmpeg", "aiohttp"]
 for pkg in required_packages:
     install_and_import(pkg)
+
+# 👇 বিশেষ ফিচার: Aria2c অটোমেটিক ডাউনলোড এবং সেটআপ (Koyeb/Server এর জন্য)
+ARIA2_BIN_PATH = os.path.join(os.getcwd(), "aria2c")
+
+def install_aria2_static():
+    if os.path.exists(ARIA2_BIN_PATH):
+        print("✅ Aria2c already installed.")
+        return ARIA2_BIN_PATH
+    
+    print("🚀 Downloading Aria2c Static Binary (For Superfast Speed)...")
+    try:
+        # Static build url for Linux 64bit
+        url = "https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2"
+        import requests
+        r = requests.get(url, stream=True)
+        tar_name = "aria2.tar.bz2"
+        with open(tar_name, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024):
+                if chunk: f.write(chunk)
+        
+        print("📦 Extracting Aria2c...")
+        with tarfile.open(tar_name, "r:bz2") as tar:
+            for member in tar.getmembers():
+                if member.name.endswith("aria2c"):
+                    member.name = "aria2c" # Rename to simple aria2c
+                    tar.extract(member, path=os.getcwd())
+                    break
+        
+        os.chmod(ARIA2_BIN_PATH, os.stat(ARIA2_BIN_PATH).st_mode | stat.S_IEXEC)
+        if os.path.exists(tar_name): os.remove(tar_name)
+        print(f"✅ Aria2c Setup Complete at: {ARIA2_BIN_PATH}")
+        return ARIA2_BIN_PATH
+    except Exception as e:
+        print(f"⚠️ Aria2c Install Failed: {e}")
+        return None
+
+# Aria2 ইন্সটল ফাংশন কল করা হচ্ছে
+ARIA2_EXECUTABLE = install_aria2_static()
 
 import requests
 import aiohttp
@@ -43,7 +85,6 @@ API_HASH = "297f51aaab99720a09e80273628c3c24"
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 
-# 🔥 আপডেট ১: ফেক ইউজার এজেন্ট (ব্লক এড়ানোর জন্য)
 FAKE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -58,7 +99,18 @@ try:
 except Exception:
     FFMPEG_LOCATION = "ffmpeg"
 
-MAX_CONCURRENT_DOWNLOADS = 3
+# 🔥 Superfast Config: Workers and Concurrency Increased
+app = Client(
+    "ultimate_bot", 
+    api_id=API_ID, 
+    api_hash=API_HASH, 
+    bot_token=BOT_TOKEN, 
+    in_memory=True,
+    workers=10, 
+    max_concurrent_transmissions=5
+)
+
+MAX_CONCURRENT_DOWNLOADS = 5
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 TASK_STORE = {} 
@@ -68,8 +120,6 @@ LAST_UPDATE_TIME = {}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("UltimateBot")
-
-app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
@@ -98,13 +148,12 @@ def time_formatter(seconds):
     return f"{m}m {s}s"
 
 def clean_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', '', name)
+    return re.sub(r'[\\/*?:"<>|]', '', name).strip()
 
 # ==========================================
-# 💾 ডাইরেক্ট ডাউনলোড হেল্পার
+# 💾 ডাইরেক্ট ডাউনলোড হেল্পার (অপ্টিমাইজড)
 # ==========================================
 async def direct_download(url, file_path, message, task_id):
-    # হেডার যুক্ত করা হলো যাতে সার্ভার ব্লক না করে
     async with aiohttp.ClientSession(headers=FAKE_HEADERS) as session:
         try:
             async with session.get(url) as response:
@@ -116,13 +165,13 @@ async def direct_download(url, file_path, message, task_id):
                 start_time = time.time()
 
                 with open(file_path, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(1024 * 1024): # 1MB chunks
+                    # 🔥 Chunk Size বাড়ানো হয়েছে (1MB -> 4MB) স্পিডের জন্য
+                    async for chunk in response.content.iter_chunked(4 * 1024 * 1024): 
                         if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED_BY_USER")
                         if chunk:
                             f.write(chunk)
                             downloaded += len(chunk)
                             
-                            # প্রোগ্রেস আপডেট
                             now = time.time()
                             last_update = LAST_UPDATE_TIME.get(task_id, 0)
                             if (now - last_update) >= 3:
@@ -141,13 +190,12 @@ async def direct_download(url, file_path, message, task_id):
             raise e
 
 # ==========================================
-# 🕵️‍♂️ স্ক্র্যাপার এবং ডিটেক্টর (আপডেটেড)
+# 🕵️‍♂️ স্ক্র্যাপার এবং ডিটেক্টর
 # ==========================================
 def get_target_url(url):
     direct_sites = ["youtube.com", "youtu.be", "facebook.com", "fb.watch", "instagram.com", "tiktok.com", "dailymotion.com", "vimeo.com", "twitter.com", "x.com"]
     if any(site in url for site in direct_sites): return url
 
-    # রিকোয়েস্টে হেডার ব্যবহার করা হচ্ছে
     try:
         response = requests.get(url, headers=FAKE_HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -179,9 +227,13 @@ def download_progress_hook(d, message, client, task_id):
 
         filled = int(percentage // 10)
         bar = "▰" * filled + "▱" * (10 - filled)
+        
+        # স্পিড দেখানোর সময় Aria2 থাকলে বুঝা যাবে
+        speed_text = human_readable_size(speed) + "/s"
+        
         text = (f"⬇️ **Downloading...**\n[{bar}] **{percentage:.1f}%**\n\n"
                 f"📦 `{human_readable_size(current)} / {human_readable_size(total)}`\n"
-                f"⚡ `{human_readable_size(speed)}/s` | ⏳ `{time_formatter(eta)}`")
+                f"🚀 `{speed_text}` | ⏳ `{time_formatter(eta)}`")
         try:
             client.loop.create_task(message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{task_id}")]])))
         except: pass
@@ -195,21 +247,20 @@ async def upload_progress_hook(current, total, message, start_time, task_id):
         eta = (total - current) / speed if speed > 0 else 0
         filled = int(percentage // 10)
         bar = "▰" * filled + "▱" * (10 - filled)
-        text = (f"⬆️ **Uploading...**\n[{bar}] **{percentage:.1f}%**\n\n"
+        text = (f"⬆️ **Fast Uploading...**\n[{bar}] **{percentage:.1f}%**\n\n"
                 f"📦 `{human_readable_size(current)} / {human_readable_size(total)}`\n"
-                f"⚡ `{human_readable_size(speed)}/s` | ⏳ `{time_formatter(eta)}`")
+                f"🚀 `{human_readable_size(speed)}/s` | ⏳ `{time_formatter(eta)}`")
         try: await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{task_id}")]]))
         except: pass
 
 # ==========================================
-# 📨 টেক্সট হ্যান্ডলার (অ্যানালাইসিস + ফিক্স)
+# 📨 টেক্সট হ্যান্ডলার
 # ==========================================
 @app.on_message(filters.text & ~filters.command(["start", "help"]))
 async def text_handler(client, message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Rename Check
     if chat_id in USER_STATE and USER_STATE[chat_id]['state'] == 'waiting_name':
         task_id = USER_STATE[chat_id]['task_id']
         custom_name = clean_filename(text)
@@ -225,7 +276,7 @@ async def text_handler(client, message):
         await message.reply("❌ Invalid Link")
         return
 
-    status_msg = await message.reply("🕵️‍♂️ **Analyzing Link...**")
+    status_msg = await message.reply("🕵️‍♂️ **Checking Link...**")
     task_id = str(uuid.uuid4())[:8]
 
     try:
@@ -233,26 +284,22 @@ async def text_handler(client, message):
         is_direct = False
         info = {}
 
-        # 🔥 আপডেট: হেডার সহ অপশন
         ydl_opts = {
             'quiet': True, 'no_warnings': True,
             'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-            'http_headers': FAKE_HEADERS, # ব্লকিং এড়াতে
+            'http_headers': FAKE_HEADERS,
         }
 
-        # yt-dlp চেষ্টা করবে
         try:
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False))
         except Exception as e:
             err_msg = str(e)
-            # 🔥 আপডেট: যদি 503, 403 বা Unsupported URL হয়, তবে ডাইরেক্ট মোড অন হবে
-            if any(x in err_msg for x in ["Unsupported URL", "HTTP Error", "503", "Service Unavailable", "403", "Forbidden"]):
-                logger.info(f"Switching to Direct Mode due to: {err_msg[:50]}")
+            if any(x in err_msg for x in ["Unsupported URL", "HTTP Error", "503", "403", "Forbidden"]):
                 is_direct = True
                 info = {'title': 'Universal_Video', 'formats': []}
             elif "ExtractorError" in err_msg:
-                await status_msg.edit("🔧 **Updating System...**")
+                await status_msg.edit("🔧 **Updating Modules...**")
                 await asyncio.to_thread(smart_update_ytdlp)
                 try:
                     info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False))
@@ -264,7 +311,6 @@ async def text_handler(client, message):
         title = info.get('title', 'Video')
         formats = info.get('formats', [])
         
-        # বাটন জেনারেশন
         buttons = []
         if not is_direct and formats:
             resolutions = set()
@@ -282,7 +328,6 @@ async def text_handler(client, message):
                 buttons.append([InlineKeyboardButton("🎬 Download Video", callback_data=f"qual_{task_id}_video_best")])
             buttons.append([InlineKeyboardButton("🎵 Extract Audio", callback_data=f"qual_{task_id}_audio_0")])
         else:
-            # 🔥 আপডেট: ফেইল হলে ইউনিভার্সাল ডাইরেক্ট বাটন
             buttons.append([InlineKeyboardButton("⬇️ Force Download (Video)", callback_data=f"qual_{task_id}_direct_best")])
 
         buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="close")])
@@ -337,7 +382,7 @@ async def callback_handler(client, query: CallbackQuery):
         asyncio.create_task(run_download_upload(client, query.message, info['url'], info['mode'], info['res'], task_id, None))
 
 # ==========================================
-# 📥 মেইন ডাউনলোড প্রসেস (Direct + yt-dlp)
+# 📥 মেইন ডাউনলোড ও আপলোড লজিক (SUPERFAST)
 # ==========================================
 async def run_download_upload(client, message, url, mode, res, task_id, custom_name):
     async with semaphore:
@@ -356,9 +401,7 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
 
         try:
             if is_direct:
-                # 🔥 আপডেট: ডাইরেক্ট মোড
-                await message.edit(f"⬇️ **Direct Downloading...**\n`Trying to bypass blocks...`")
-                # ডিফল্টভাবে .mp4 ধরা হবে যদি এক্সটেনশন না পাওয়া যায়
+                await message.edit(f"⬇️ **Direct Downloading (High Speed)...**")
                 ext = ".mp4" 
                 if url.endswith((".mkv", ".mp3", ".webm", ".jpg", ".png", ".avi")):
                     ext = "." + url.split('.')[-1]
@@ -366,19 +409,26 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
                 final_path = f"{temp_dir}/{file_name}{ext}"
                 await direct_download(url, final_path, message, task_id)
             else:
-                # yt-dlp Logic
-                await message.edit(f"⬇️ **Downloading (yt-dlp)...**")
+                # 🔥 সুপারফাস্ট yt-dlp + Aria2c সেটআপ
+                await message.edit(f"⬇️ **Downloading with Aria2 Engine...**")
                 out_templ = f"{temp_dir}/{file_name}.%(ext)s"
                 
-                # 🔥 আপডেট: হেডার্স যোগ করা হলো
                 ydl_opts = {
                     'outtmpl': out_templ,
                     'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
                     'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
                     'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
-                    'http_headers': FAKE_HEADERS, # ব্লকিং এড়াতে
+                    'http_headers': FAKE_HEADERS,
                     'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
                     'progress_hooks': [lambda d: download_progress_hook(d, message, client, task_id)],
+                    
+                    # 👇 এই অংশটি স্পিড বাড়াবে (Aria2c Integration)
+                    'external_downloader': ARIA2_EXECUTABLE,
+                    'external_downloader_args': [
+                        '-x', '16',    # 16 Concurrent Connections
+                        '-k', '1M',    # 1MB Min Split
+                        '-s', '16'     # 16 Sources
+                    ] if ARIA2_EXECUTABLE else []
                 }
                 
                 if mode == "audio":
@@ -399,7 +449,10 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
                 if not os.path.exists(final_path): final_path = temp_path
                 
                 thumb_path = os.path.splitext(temp_path)[0] + ".jpg"
-                if not os.path.exists(thumb_path): thumb_path = None
+                if not os.path.exists(thumb_path): 
+                    thumb_path = os.path.splitext(temp_path)[0] + ".webp"
+                    if not os.path.exists(thumb_path): thumb_path = None
+                    
                 duration = int(info.get('duration', 0))
 
             if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED_BY_USER")
@@ -408,12 +461,11 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
                 await message.edit("❌ **File > 2GB (Telegram Limit).**")
                 return
 
-            await message.edit(f"⬆️ **Uploading...**")
+            await message.edit(f"⬆️ **Uploading to Telegram...**")
             start_time = time.time()
             
-            caption = f"🎬 **{file_name}**\n✅ Downloaded by Bot"
+            caption = f"🎬 **{file_name}**\n✅ Downloaded by UltimateBot"
             
-            # 🔥 আপডেট: ভিডিও হিসেবে পাঠানোর জোর জবরদস্তি
             if mode == "audio": 
                 await client.send_audio(
                     chat_id=message.chat.id,
@@ -425,7 +477,6 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
                     progress_args=(message, start_time, task_id)
                 )
             else: 
-                # Direct ডাউনলোড হলেও send_video ব্যবহার করবে
                 await client.send_video(
                     chat_id=message.chat.id,
                     video=final_path,
@@ -450,7 +501,7 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
 @app.on_message(filters.document)
 async def cookie(c, m): await m.download(file_name=COOKIE_FILE); await m.reply("✅ Cookies Updated")
 @app.on_message(filters.command("start"))
-async def start(c, m): await m.reply("👋 **Bot Ready!**\nSend Link -> Quality -> Rename -> Enjoy!")
+async def start(c, m): await m.reply("👋 **Superfast Bot Ready!**\nAuto-installer enabled for Koyeb.\nSend Link -> Quality -> Rename -> Enjoy!")
 
-print("🔥 Bot Started with Universal Fixes...")
+print("🔥 Bot Started with Auto-Dependencies & Aria2 Engine...")
 app.run()
