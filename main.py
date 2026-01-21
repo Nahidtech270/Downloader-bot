@@ -43,15 +43,12 @@ API_HASH = "297f51aaab99720a09e80273628c3c24"
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 
-# 🔥 আপডেট ১: ফেক ইউজার এজেন্ট (ব্লক এড়ানোর জন্য)
 FAKE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': '*/*',
     'Referer': 'https://google.com/'
 }
 
-# FFmpeg লোকেশন
 try:
     FFMPEG_LOCATION = imageio_ffmpeg.get_ffmpeg_exe()
     print(f"✅ FFmpeg found at: {FFMPEG_LOCATION}")
@@ -101,61 +98,100 @@ def clean_filename(name):
     return re.sub(r'[\\/*?:"<>|]', '', name)
 
 # ==========================================
-# 💾 ডাইরেক্ট ডাউনলোড হেল্পার
+# 🛠 FFmpeg কনভার্টার (ভিডিও ফিক্স করার জন্য)
+# ==========================================
+async def convert_to_mp4(input_path, output_path):
+    cmd = [
+        FFMPEG_LOCATION, '-i', input_path,
+        '-c:v', 'copy', '-c:a', 'copy', # ফাস্ট কপি (এনকোডিং ছাড়াই)
+        '-movflags', '+faststart', # স্ট্রিমিং সাপোর্টের জন্য
+        output_path, '-y'
+    ]
+    # যদি কপি না কাজ করে, তবে রি-এনকোড করবে (সেফটি)
+    process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    await process.communicate()
+    
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        return True
+    return False
+
+# ==========================================
+# 💾 ডাইরেক্ট ডাউনলোড হেল্পার (আপডেটেড)
 # ==========================================
 async def direct_download(url, file_path, message, task_id):
-    # হেডার যুক্ত করা হলো যাতে সার্ভার ব্লক না করে
-    async with aiohttp.ClientSession(headers=FAKE_HEADERS) as session:
-        try:
-            async with session.get(url) as response:
-                if response.status not in [200, 206]:
-                    raise Exception(f"Direct Download Failed: HTTP {response.status}")
-                
-                total_size = int(response.headers.get('content-length', 0))
-                downloaded = 0
-                start_time = time.time()
+    # m3u8 বা স্ট্রিম লিংক হলে FFmpeg দিয়ে ডাউনলোড করবে
+    if ".m3u8" in url or "stream" in url:
+        cmd = [
+            FFMPEG_LOCATION, '-headers', f'User-Agent: {FAKE_HEADERS["User-Agent"]}',
+            '-i', url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', file_path, '-y'
+        ]
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await process.communicate()
+        return
 
-                with open(file_path, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(1024 * 1024): # 1MB chunks
-                        if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED_BY_USER")
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
+    # সাধারণ ফাইল হলে aiohttp দিয়ে ডাউনলোড
+    async with aiohttp.ClientSession(headers=FAKE_HEADERS) as session:
+        async with session.get(url) as response:
+            if response.status not in [200, 206]:
+                raise Exception(f"Direct Download Failed: HTTP {response.status}")
+            
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            start_time = time.time()
+
+            with open(file_path, 'wb') as f:
+                async for chunk in response.content.iter_chunked(1024 * 1024): # 1MB chunks
+                    if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED_BY_USER")
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # প্রোগ্রেস আপডেট
+                        now = time.time()
+                        last_update = LAST_UPDATE_TIME.get(task_id, 0)
+                        if (now - last_update) >= 3:
+                            LAST_UPDATE_TIME[task_id] = now
+                            percentage = downloaded * 100 / total_size if total_size > 0 else 0
+                            speed = downloaded / (now - start_time) if (now - start_time) > 0 else 0
                             
-                            # প্রোগ্রেস আপডেট
-                            now = time.time()
-                            last_update = LAST_UPDATE_TIME.get(task_id, 0)
-                            if (now - last_update) >= 3:
-                                LAST_UPDATE_TIME[task_id] = now
-                                percentage = downloaded * 100 / total_size if total_size > 0 else 0
-                                speed = downloaded / (now - start_time) if (now - start_time) > 0 else 0
-                                
-                                filled = int(percentage // 10)
-                                bar = "▰" * filled + "▱" * (10 - filled)
-                                text = (f"⬇️ **Direct Downloading...**\n[{bar}] **{percentage:.1f}%**\n"
-                                        f"📦 `{human_readable_size(downloaded)}` | ⚡ `{human_readable_size(speed)}/s`")
-                                try:
-                                    await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{task_id}")]]))
-                                except: pass
-        except Exception as e:
-            raise e
+                            filled = int(percentage // 10)
+                            bar = "▰" * filled + "▱" * (10 - filled)
+                            text = (f"⬇️ **Direct Downloading...**\n[{bar}] **{percentage:.1f}%**\n"
+                                    f"📦 `{human_readable_size(downloaded)}` | ⚡ `{human_readable_size(speed)}/s`")
+                            try:
+                                await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{task_id}")]]))
+                            except: pass
 
 # ==========================================
-# 🕵️‍♂️ স্ক্র্যাপার এবং ডিটেক্টর (আপডেটেড)
+# 🕵️‍♂️ স্ক্র্যাপার এবং ডিটেক্টর
 # ==========================================
 def get_target_url(url):
     direct_sites = ["youtube.com", "youtu.be", "facebook.com", "fb.watch", "instagram.com", "tiktok.com", "dailymotion.com", "vimeo.com", "twitter.com", "x.com"]
     if any(site in url for site in direct_sites): return url
 
-    # রিকোয়েস্টে হেডার ব্যবহার করা হচ্ছে
     try:
         response = requests.get(url, headers=FAKE_HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 1. HLS Stream (m3u8) খোঁজা
+        if "m3u8" in response.text:
+            m3u8_match = re.search(r'(https?://[^\s"]+\.m3u8)', response.text)
+            if m3u8_match: return m3u8_match.group(1)
+
+        # 2. Iframe খোঁজা
         iframes = soup.find_all('iframe')
         for iframe in iframes:
             src = iframe.get('src')
             if src and any(d in src for d in ['dailymotion', 'youtube', 'vidoza', 'streamtape', 'ok.ru', 'vk.com']):
                 return 'https:' + src if src.startswith('//') else src
+                
+        # 3. Video Tag
+        video = soup.find('video')
+        if video:
+            if video.get('src'): return video.get('src')
+            source = video.find('source')
+            if source and source.get('src'): return source.get('src')
+
     except: pass
     return url
 
@@ -173,15 +209,14 @@ def download_progress_hook(d, message, client, task_id):
         current = d.get('downloaded_bytes', 0)
         percentage = current * 100 / total if total > 0 else 0
         speed = d.get('speed') or 0
-        eta = d.get('eta') or 0
         
         if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED_BY_USER")
 
         filled = int(percentage // 10)
         bar = "▰" * filled + "▱" * (10 - filled)
-        text = (f"⬇️ **Downloading...**\n[{bar}] **{percentage:.1f}%**\n\n"
+        text = (f"⬇️ **Downloading...**\n[{bar}] **{percentage:.1f}%**\n"
                 f"📦 `{human_readable_size(current)} / {human_readable_size(total)}`\n"
-                f"⚡ `{human_readable_size(speed)}/s` | ⏳ `{time_formatter(eta)}`")
+                f"⚡ `{human_readable_size(speed)}/s`")
         try:
             client.loop.create_task(message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{task_id}")]])))
         except: pass
@@ -192,24 +227,22 @@ async def upload_progress_hook(current, total, message, start_time, task_id):
     if round((now - start_time) % 4.00) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / (now - start_time) if (now - start_time) > 0 else 0
-        eta = (total - current) / speed if speed > 0 else 0
         filled = int(percentage // 10)
         bar = "▰" * filled + "▱" * (10 - filled)
-        text = (f"⬆️ **Uploading...**\n[{bar}] **{percentage:.1f}%**\n\n"
+        text = (f"⬆️ **Uploading...**\n[{bar}] **{percentage:.1f}%**\n"
                 f"📦 `{human_readable_size(current)} / {human_readable_size(total)}`\n"
-                f"⚡ `{human_readable_size(speed)}/s` | ⏳ `{time_formatter(eta)}`")
+                f"⚡ `{human_readable_size(speed)}/s`")
         try: await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{task_id}")]]))
         except: pass
 
 # ==========================================
-# 📨 টেক্সট হ্যান্ডলার (অ্যানালাইসিস + ফিক্স)
+# 📨 টেক্সট হ্যান্ডলার
 # ==========================================
 @app.on_message(filters.text & ~filters.command(["start", "help"]))
 async def text_handler(client, message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Rename Check
     if chat_id in USER_STATE and USER_STATE[chat_id]['state'] == 'waiting_name':
         task_id = USER_STATE[chat_id]['task_id']
         custom_name = clean_filename(text)
@@ -233,20 +266,17 @@ async def text_handler(client, message):
         is_direct = False
         info = {}
 
-        # 🔥 আপডেট: হেডার সহ অপশন
         ydl_opts = {
             'quiet': True, 'no_warnings': True,
             'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-            'http_headers': FAKE_HEADERS, # ব্লকিং এড়াতে
+            'http_headers': FAKE_HEADERS,
         }
 
-        # yt-dlp চেষ্টা করবে
         try:
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False))
         except Exception as e:
             err_msg = str(e)
-            # 🔥 আপডেট: যদি 503, 403 বা Unsupported URL হয়, তবে ডাইরেক্ট মোড অন হবে
             if any(x in err_msg for x in ["Unsupported URL", "HTTP Error", "503", "Service Unavailable", "403", "Forbidden"]):
                 logger.info(f"Switching to Direct Mode due to: {err_msg[:50]}")
                 is_direct = True
@@ -264,7 +294,6 @@ async def text_handler(client, message):
         title = info.get('title', 'Video')
         formats = info.get('formats', [])
         
-        # বাটন জেনারেশন
         buttons = []
         if not is_direct and formats:
             resolutions = set()
@@ -282,7 +311,6 @@ async def text_handler(client, message):
                 buttons.append([InlineKeyboardButton("🎬 Download Video", callback_data=f"qual_{task_id}_video_best")])
             buttons.append([InlineKeyboardButton("🎵 Extract Audio", callback_data=f"qual_{task_id}_audio_0")])
         else:
-            # 🔥 আপডেট: ফেইল হলে ইউনিভার্সাল ডাইরেক্ট বাটন
             buttons.append([InlineKeyboardButton("⬇️ Force Download (Video)", callback_data=f"qual_{task_id}_direct_best")])
 
         buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="close")])
@@ -337,7 +365,7 @@ async def callback_handler(client, query: CallbackQuery):
         asyncio.create_task(run_download_upload(client, query.message, info['url'], info['mode'], info['res'], task_id, None))
 
 # ==========================================
-# 📥 মেইন ডাউনলোড প্রসেস (Direct + yt-dlp)
+# 📥 মেইন ডাউনলোড প্রসেস
 # ==========================================
 async def run_download_upload(client, message, url, mode, res, task_id, custom_name):
     async with semaphore:
@@ -350,33 +378,34 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
         
         is_direct = TASK_STORE[task_id].get('is_direct', False) or mode == 'direct'
         
-        final_path = ""
+        # আমরা ফাইলটিকে প্রথমে 'downloaded_file' হিসেবে সেভ করব, তারপর কনভার্ট করব
+        temp_path = f"{temp_dir}/downloaded_file"
+        final_path = f"{temp_dir}/{file_name}.mp4"
         thumb_path = None
         duration = 0
 
         try:
             if is_direct:
-                # 🔥 আপডেট: ডাইরেক্ট মোড
                 await message.edit(f"⬇️ **Direct Downloading...**\n`Trying to bypass blocks...`")
-                # ডিফল্টভাবে .mp4 ধরা হবে যদি এক্সটেনশন না পাওয়া যায়
-                ext = ".mp4" 
-                if url.endswith((".mkv", ".mp3", ".webm", ".jpg", ".png", ".avi")):
-                    ext = "." + url.split('.')[-1]
+                await direct_download(url, temp_path, message, task_id)
                 
-                final_path = f"{temp_dir}/{file_name}{ext}"
-                await direct_download(url, final_path, message, task_id)
+                # 🔥 আপডেট: ফাইলটি কি প্লে করার যোগ্য? চেক করা ও ফিক্স করা
+                await message.edit(f"🔧 **Processing Video...**\n`Making it playable...`")
+                if not await convert_to_mp4(temp_path, final_path):
+                    # কনভার্ট ফেইল হলে অরিজিনালটাই রিনেম করে দেব
+                    os.rename(temp_path, final_path)
+            
             else:
                 # yt-dlp Logic
                 await message.edit(f"⬇️ **Downloading (yt-dlp)...**")
                 out_templ = f"{temp_dir}/{file_name}.%(ext)s"
                 
-                # 🔥 আপডেট: হেডার্স যোগ করা হলো
                 ydl_opts = {
                     'outtmpl': out_templ,
                     'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
                     'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
                     'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
-                    'http_headers': FAKE_HEADERS, # ব্লকিং এড়াতে
+                    'http_headers': FAKE_HEADERS,
                     'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
                     'progress_hooks': [lambda d: download_progress_hook(d, message, client, task_id)],
                 }
@@ -394,11 +423,16 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
                         info = ydl.extract_info(url, download=True)
                         return ydl.prepare_filename(info), info
                 
-                temp_path, info = await asyncio.to_thread(run_dl)
-                final_path = os.path.splitext(temp_path)[0] + (".mp3" if mode == "audio" else ".mp4")
-                if not os.path.exists(final_path): final_path = temp_path
+                downloaded_path, info = await asyncio.to_thread(run_dl)
                 
-                thumb_path = os.path.splitext(temp_path)[0] + ".jpg"
+                # পাথ ফিক্স করা
+                if mode == "audio":
+                    final_path = os.path.splitext(downloaded_path)[0] + ".mp3"
+                else:
+                    final_path = os.path.splitext(downloaded_path)[0] + ".mp4"
+                
+                if not os.path.exists(final_path): final_path = downloaded_path
+                thumb_path = os.path.splitext(downloaded_path)[0] + ".jpg"
                 if not os.path.exists(thumb_path): thumb_path = None
                 duration = int(info.get('duration', 0))
 
@@ -413,7 +447,6 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
             
             caption = f"🎬 **{file_name}**\n✅ Downloaded by Bot"
             
-            # 🔥 আপডেট: ভিডিও হিসেবে পাঠানোর জোর জবরদস্তি
             if mode == "audio": 
                 await client.send_audio(
                     chat_id=message.chat.id,
@@ -425,7 +458,6 @@ async def run_download_upload(client, message, url, mode, res, task_id, custom_n
                     progress_args=(message, start_time, task_id)
                 )
             else: 
-                # Direct ডাউনলোড হলেও send_video ব্যবহার করবে
                 await client.send_video(
                     chat_id=message.chat.id,
                     video=final_path,
@@ -452,5 +484,5 @@ async def cookie(c, m): await m.download(file_name=COOKIE_FILE); await m.reply("
 @app.on_message(filters.command("start"))
 async def start(c, m): await m.reply("👋 **Bot Ready!**\nSend Link -> Quality -> Rename -> Enjoy!")
 
-print("🔥 Bot Started with Universal Fixes...")
+print("🔥 Bot Started with Video Fixer...")
 app.run()
