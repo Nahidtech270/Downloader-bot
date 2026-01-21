@@ -29,7 +29,7 @@ required_packages = ["pyrogram", "tgcrypto", "yt_dlp", "requests", "bs4", "image
 for pkg in required_packages:
     install_and_import(pkg)
 
-# 👇 বিশেষ ফিচার: Aria2c অটোমেটিক ডাউনলোড এবং সেটআপ (Koyeb/Server এর জন্য)
+# 👇 বিশেষ ফিচার: Aria2c অটোমেটিক ডাউনলোড এবং সেটআপ (FIXED)
 ARIA2_BIN_PATH = os.path.join(os.getcwd(), "aria2c")
 
 def install_aria2_static():
@@ -37,22 +37,33 @@ def install_aria2_static():
         print("✅ Aria2c already installed.")
         return ARIA2_BIN_PATH
     
+    # সিস্টেম প্যাকেজ ম্যানেজার দিয়ে চেস্টা
+    aria_sys = shutil.which("aria2c")
+    if aria_sys:
+        print(f"✅ Found System Aria2c at: {aria_sys}")
+        return aria_sys
+
     print("🚀 Downloading Aria2c Static Binary (For Superfast Speed)...")
     try:
-        # Static build url for Linux 64bit
+        # GitHub User-Agent যুক্ত করা হয়েছে যাতে ব্লক না করে
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         url = "https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2"
+        
         import requests
-        r = requests.get(url, stream=True)
+        r = requests.get(url, headers=headers, stream=True)
+        r.raise_for_status() # চেক করবে ডাউনলোড সফল হয়েছে কিনা
+
         tar_name = "aria2.tar.bz2"
         with open(tar_name, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024):
                 if chunk: f.write(chunk)
         
         print("📦 Extracting Aria2c...")
+        # টারফাইল এক্সট্রাকশন ফিক্স
         with tarfile.open(tar_name, "r:bz2") as tar:
             for member in tar.getmembers():
                 if member.name.endswith("aria2c"):
-                    member.name = "aria2c" # Rename to simple aria2c
+                    member.name = "aria2c" 
                     tar.extract(member, path=os.getcwd())
                     break
         
@@ -62,6 +73,7 @@ def install_aria2_static():
         return ARIA2_BIN_PATH
     except Exception as e:
         print(f"⚠️ Aria2c Install Failed: {e}")
+        # ফেইল হলে সাধারণ মোডে চলবে
         return None
 
 # Aria2 ইন্সটল ফাংশন কল করা হচ্ছে
