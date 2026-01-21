@@ -58,7 +58,7 @@ def get_target_url(url):
     if any(site in url for site in direct_sites):
         return url
 
-    # GilliTV বা অন্যান্য সাইট স্ক্র্যাপ করা
+    # GilliTV বা ড্রামা সাইট স্ক্র্যাপ করা
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     try:
         response = requests.get(url, headers=headers, timeout=15)
@@ -102,29 +102,31 @@ async def progress(current, total, message, start_time, status_text):
 # ==========================================
 async def download_worker(url, message, status_msg):
     target_url = await asyncio.to_thread(get_target_url, url)
-    await status_msg.edit(f"✅ সোর্স পাওয়া গেছে!\n⬇️ ডাউনলোড হচ্ছে...")
+    await status_msg.edit(f"✅ লিংক প্রসেসিং...\n⬇️ ডাউনলোড শুরু হচ্ছে...")
 
     timestamp = int(time.time())
     out_templ = f"{DOWNLOAD_FOLDER}/video_{timestamp}.%(ext)s"
 
     # ---------------------------------------------------------
-    # সবচেয়ে গুরুত্বপূর্ণ পরিবর্তন (FFmpeg ছাড়া ডাউনলোড)
+    # আপডেট: YouTube এরর ফিক্স এবং FB/Insta সেটিংস
     # ---------------------------------------------------------
     ydl_opts = {
-        # 'bestvideo+bestaudio' বাদ দিয়ে 'best' দেওয়া হলো যাতে FFmpeg না লাগে
         'format': 'best[ext=mp4]/best', 
         'outtmpl': out_templ,
         'quiet': False,
         'no_warnings': False,
         'nocheckcertificate': True,
-        # ইউটিউব ফিক্স (অ্যান্ড্রয়েড ক্লায়েন্ট সাজা)
+        'source_address': '0.0.0.0', # Force IPv4 (অনেক সময় IPv6 ব্লক থাকে)
+        
+        # YouTube 429 Error Fix (iOS Client ব্যবহার করা)
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web']
+                'player_client': ['ios', 'web_creator', 'android_creator']
             }
         },
-        # ফেইসবুক/ইনস্টাগ্রাম ইউজার এজেন্ট
-        'user_agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+        
+        # Facebook/Instagram এর জন্য ব্রাউজার সাজা
+        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
     }
 
     try:
@@ -136,8 +138,6 @@ async def download_worker(url, message, status_msg):
         file_path, info = await asyncio.to_thread(run_yt_dlp)
         
         video_title = info.get('title', 'Downloaded Video')
-        
-        # Float to Int কনভার্শন (ক্র্যাশ ফিক্স)
         duration = int(info.get('duration', 0)) if info.get('duration') else 0
         width = int(info.get('width', 0)) if info.get('width') else 0
         height = int(info.get('height', 0)) if info.get('height') else 0
@@ -147,7 +147,7 @@ async def download_worker(url, message, status_msg):
              return
 
         file_size = os.path.getsize(file_path)
-        await status_msg.edit(f"⬇️ ডাউনলোড কমপ্লিট!\n📦 সাইজ: {human_readable_size(file_size)}\n⬆️ আপলোড হচ্ছে...")
+        await status_msg.edit(f"⬇️ ডাউনলোড সম্পন্ন!\n📦 সাইজ: {human_readable_size(file_size)}\n⬆️ টেলিগ্রামে আপলোড হচ্ছে...")
 
         start_time = time.time()
         
@@ -174,12 +174,11 @@ async def download_worker(url, message, status_msg):
         if thumb_path: os.remove(thumb_path)
 
     except Exception as e:
-        # এরর মেসেজ ক্লিন করা
         err = str(e)
-        if "Sign in" in err:
-            err = "YouTube কুকিজ বা সাইন-ইন চাচ্ছে (Server IP Blocked)।"
-        elif "ffmpeg" in err:
-            err = "FFmpeg সমস্যা (তবে এই কোডে এটি হওয়ার কথা না)।"
+        if "Too Many Requests" in err or "429" in err:
+            err = "❌ YouTube সার্ভার আইপি ব্লক করেছে (429 Error)। পরে চেষ্টা করুন।"
+        elif "Sign in" in err:
+            err = "❌ YouTube সাইন-ইন চাচ্ছে (Cookies Required)।"
         
         await status_msg.edit(f"❌ এরর: `{err[:200]}...`")
         logger.error(f"Error: {e}")
@@ -192,7 +191,7 @@ async def download_worker(url, message, status_msg):
 # ==========================================
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text("👋 Universal Downloader!\nGilliTV, YouTube, FB, Insta লিংক দিন।")
+    await message.reply_text("👋 Universal Downloader V4 (YouTube Fix)\nলিংক দিন।")
 
 @app.on_message(filters.text)
 async def handle_url(client, message):
@@ -201,5 +200,5 @@ async def handle_url(client, message):
     msg = await message.reply_text("🕵️‍♂️ প্রসেসিং...")
     asyncio.create_task(download_worker(url, message, msg))
 
-print("🤖 Universal Bot Running...")
+print("🤖 Bot Started with iOS Client Spoofing...")
 app.run()
