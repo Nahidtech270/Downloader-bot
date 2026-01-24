@@ -86,9 +86,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQ
 # ==========================================
 # ⚙️ কনফিগারেশন
 # ==========================================
-BOT_TOKEN = "8437509974:AAFEVweRFb653-PlahAgAYUcFFAJY_OYcyc"
-API_ID = 29462738
-API_HASH = "297f51aaab99720a09e80273628c3c24"
+BOT_TOKEN = "7849157640:AAFyGM8F-Yk7tqH2A_vOfVGqMx6bXPq-pTI"
+API_ID = 22697010
+API_HASH = "fd88d7339b0371eb2a9501d523f3e2a7"
 
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
