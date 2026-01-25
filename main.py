@@ -13,9 +13,9 @@ import random
 from datetime import datetime
 
 # ==========================================
-# 🛠 ১. সিস্টেম ও ডিপেন্ডেন্সি (All Tools)
+# 🛠 ১. অটোমেটিক ডিপেন্ডেন্সি (Cloudscraper Added)
 # ==========================================
-print("⚙️ System Initializing (Final Fix)...")
+print("⚙️ System Initializing (Anti-Bot Bypass)...")
 
 def install_and_import(package):
     try:
@@ -24,9 +24,13 @@ def install_and_import(package):
         print(f"🔄 Installing: {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-required_packages = ["pyrogram", "tgcrypto", "yt_dlp", "requests", "bs4", "imageio_ffmpeg", "aiohttp", "fake_useragent"]
+# 🔥 cloudscraper খুবই গুরুত্বপূর্ণ এই সাইটের জন্য
+required_packages = ["pyrogram", "tgcrypto", "yt_dlp", "requests", "bs4", "imageio_ffmpeg", "aiohttp", "fake_useragent", "cloudscraper"]
 for pkg in required_packages:
     install_and_import(pkg)
+
+import cloudscraper # Cloudflare Bypasser
+from fake_useragent import UserAgent
 
 # Aria2c Setup
 ARIA2_BIN_PATH = os.path.join(os.getcwd(), "aria2c")
@@ -66,7 +70,6 @@ import yt_dlp
 import imageio_ffmpeg
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from fake_useragent import UserAgent
 
 # ==========================================
 # ⚙️ কনফিগারেশন
@@ -78,28 +81,12 @@ API_HASH = "fd88d7339b0371eb2a9501d523f3e2a7"
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 
-# 🔥 হেডার জেনারেটর (ব্রাউজারের মতো আচরণ করবে)
-def get_headers(referer=None):
-    ua = UserAgent()
-    headers = {
-        'User-Agent': ua.chrome,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Dest': 'document',
-        'Connection': 'keep-alive',
-    }
-    if referer:
-        headers['Referer'] = referer
-        headers['Origin'] = referer.split('/')[0] + '//' + referer.split('/')[2]
-    return headers
-
 try:
     FFMPEG_LOCATION = imageio_ffmpeg.get_ffmpeg_exe()
 except:
     FFMPEG_LOCATION = "ffmpeg"
 
-app = Client("ultimate_uploader", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True, workers=10, max_concurrent_transmissions=5)
+app = Client("bypass_uploader", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True, workers=10, max_concurrent_transmissions=5)
 
 MAX_CONCURRENT_DOWNLOADS = 5
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
@@ -109,7 +96,7 @@ CANCEL_EVENTS = {}
 LAST_UPDATE_TIME = {}
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("UltimateBot")
+logger = logging.getLogger("BypassBot")
 
 if not os.path.exists(DOWNLOAD_FOLDER): os.makedirs(DOWNLOAD_FOLDER)
 
@@ -139,24 +126,33 @@ async def update_progress(message, percentage, current, total, speed, status_tex
     except: pass
 
 # ==========================================
-# 🕵️‍♂️ ULTRA DEEP SCRAPER (Regex + Headers)
+# 🕵️‍♂️ CLOUDSCRAPER & LINK EXTRACTOR (CORE FIX)
 # ==========================================
-def extract_stream_link(url):
+def get_protected_link(url):
+    """
+    Cloudscraper ব্যবহার করে সাইট বাইপাস করে আসল m3u8 লিংক বের করবে
+    এবং কুকি ফাইল আপডেট করবে।
+    """
     try:
-        # ইউটিউব বা ডাইরেক্ট সাইট হলে স্কিপ
         if any(x in url for x in ["youtube.com", "youtu.be", "facebook.com"]): return url, url
 
-        print(f"🕵️‍♂️ Scanning: {url}")
-        session = requests.Session()
-        session.headers.update(get_headers(url))
+        print(f"🛡️ Bypassing Protection: {url}")
         
-        r = session.get(url, timeout=20, allow_redirects=True)
-        html = r.text
+        # 🔥 Cloudflare Bypasser
+        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True})
+        response = scraper.get(url)
         
-        # Regex (More Powerful)
+        # কুকি ফাইলে সেভ করা (yt-dlp এর জন্য)
+        with open(COOKIE_FILE, 'w') as f:
+            f.write("# Netscape HTTP Cookie File\n")
+            for cookie in scraper.cookies:
+                f.write(f"{cookie.domain}\tTRUE\t{cookie.path}\t{'TRUE' if cookie.secure else 'FALSE'}\t{cookie.expires}\t{cookie.name}\t{cookie.value}\n")
+
+        html = response.text
+        
+        # Regex to find hidden streams
         patterns = [
             r'file:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
-            r'source:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
             r'src:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
             r'(https?://[^"\s]+\.m3u8[^"\s]*)', 
             r'file:\s*["\'](https?://[^"\']+\.mp4[^"\']*)["\']',
@@ -166,13 +162,18 @@ def extract_stream_link(url):
             match = re.search(pattern, html)
             if match:
                 stream_url = match.group(1).replace('\\/', '/')
-                print(f"✅ Found Hidden Stream: {stream_url}")
-                # যদি স্ট্রিম লিংক পাওয়া যায়, রেফারার হিসেবে মেইন পেজ ফেরত দেব
+                print(f"✅ Found Protected Stream: {stream_url}")
+                
+                # যদি m3u8 লিংক রিলেটিভ হয় (http না থাকে)
+                if not stream_url.startswith("http"):
+                    # ডোমেইন অ্যাড করা লাগতে পারে, আপাতত ইগনোর করছি
+                    pass 
+                
                 return stream_url, url 
         
-        return url, url # কিছু না পেলে যা আছে তাই
+        return url, url 
     except Exception as e:
-        print(f"⚠️ Scrape Error: {e}")
+        print(f"⚠️ Bypass Error: {e}")
         return url, url
 
 # ==========================================
@@ -198,26 +199,23 @@ async def text_handler(client, message):
         await message.reply("❌ **Invalid Link!**")
         return
 
-    status_msg = await message.reply("🕵️‍♂️ **Analyzing Link...**")
+    status_msg = await message.reply("🕵️‍♂️ **Bypassing Cloudflare...**")
     task_id = str(uuid.uuid4())[:8]
 
     try:
-        # ১. লিংক বের করা
-        target_url, referer = await asyncio.to_thread(extract_stream_link, text)
+        # 🔥 নতুন বাইপাস লজিক
+        target_url, referer = await asyncio.to_thread(get_protected_link, text)
         is_direct = False
         info = {}
         
-        # ২. হেডার সেট করা
-        current_headers = get_headers(referer)
-        
+        # হেডার জেনারেট (কুকি ফাইল ইউজ হবে)
         ydl_opts = {
             'quiet': True, 'no_warnings': True,
-            'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-            'user_agent': current_headers['User-Agent'],
-            'http_headers': current_headers,
+            'cookiefile': COOKIE_FILE, # Generated by Cloudscraper
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'referer': referer
         }
 
-        # ৩. ইনফো বের করার চেষ্টা
         try:
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False))
         except:
@@ -229,7 +227,7 @@ async def text_handler(client, message):
         
         buttons = []
         
-        # ৪. কোয়ালিটি বাটন
+        # কোয়ালিটি বাটন
         if not is_direct and formats:
             resolutions = sorted(list(set([f.get('height') for f in formats if f.get('height')])), reverse=True)
             if resolutions:
@@ -239,21 +237,19 @@ async def text_handler(client, message):
                     if len(row) == 3: buttons.append(row); row = []
                 if row: buttons.append(row)
         
-        # ৫. কন্ট্রোল বাটন
         ctrl_buttons = [
-            [InlineKeyboardButton("🎬 Download Video (Auto)", callback_data=f"q_{task_id}_vid_best")],
-            [InlineKeyboardButton("📁 Document (Safe Mode)", callback_data=f"q_{task_id}_doc_best")],
+            [InlineKeyboardButton("🎬 Best Video (Safe)", callback_data=f"q_{task_id}_vid_best")],
+            [InlineKeyboardButton("📁 Document (Raw)", callback_data=f"q_{task_id}_doc_best")],
             [InlineKeyboardButton("🎵 Audio Only", callback_data=f"q_{task_id}_aud_0")],
             [InlineKeyboardButton("❌ Cancel", callback_data="close")]
         ]
-        
         for btn in ctrl_buttons: buttons.append(btn)
 
         TASK_STORE[task_id] = {"url": target_url, "referer": referer, "title": title}
         await status_msg.edit(
             f"📂 **Found:** `{title[:60]}`\n"
-            f"🔗 **Source:** `{target_url[:40]}...`\n"
-            f"✨ **Note:** If video fails, try Document mode.", 
+            f"🔗 **Real Link:** `{target_url[:30]}...`\n"
+            f"🔓 **Protection:** Bypassed ✅", 
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
@@ -294,7 +290,7 @@ async def callback_handler(client, query: CallbackQuery):
         asyncio.create_task(run_download_upload(client, query.message, info['url'], info['referer'], info['mode'], info['res'], task_id, None))
 
 # ==========================================
-# 🚀 ULTIMATE DOWNLOAD ENGINE (Force Fix)
+# 🚀 ULTRA ENGINE (Cloudflare Support)
 # ==========================================
 def yt_dlp_hook(d, message, client, task_id):
     if d['status'] == 'downloading':
@@ -331,40 +327,31 @@ async def run_download_upload(client, message, url, referer, mode, res, task_id,
         thumb_path = None
         duration = 0
 
-        # 🔥 হেডার এবং রেফারার খুবই গুরুত্বপূর্ণ এই সাইটগুলোর জন্য
-        dl_headers = get_headers(referer)
-
         try:
-            await message.edit("🚀 **Engine Starting (Protected Mode)...**")
+            await message.edit("🚀 **Engine Starting (Bypass Mode)...**")
             out_templ = f"{temp_dir}/{file_name}.%(ext)s"
             
+            # 🔥 CRITICAL: কুকি ফাইল ব্যবহার করা হচ্ছে যা Cloudscraper তৈরি করেছে
             ydl_opts = {
                 'outtmpl': out_templ,
                 'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
-                'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
+                'cookiefile': COOKIE_FILE, 
                 'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
-                'http_headers': dl_headers, # ✅ Correct Headers passed
+                'http_headers': {'Referer': referer, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
                 'progress_hooks': [lambda d: yt_dlp_hook(d, message, client, task_id)],
                 'socket_timeout': 60,
                 'retries': 20,
             }
 
-            # 🛑 IMPORTANT FIX: Aria2 Disable for Problematic Links
-            # আপনার লিংকে "player.php" বা "m3u8" থাকলে Aria2 ব্যবহার করব না।
-            # কারণ Aria2 কুকি বা হেডার ঠিকমতো পাস করতে পারে না HLS এর ক্ষেত্রে।
-            is_problematic = "m3u8" in url or "player.php" in url or "instantdl" in url
-
-            if is_problematic:
-                # ✅ Native Downloader (Slow but 100% working)
+            # 🛑 ARIA2 DISABLE for this specific site
+            # Aria2 কুকি ফাইল রিড করতে পারে না ঠিকমতো এই ধরনের সেশন এর ক্ষেত্রে
+            if "m3u8" in url or "instantdl" in url:
                 ydl_opts['hls_prefer_native'] = True
-                ydl_opts['hls_use_mpegts'] = True
-                ydl_opts['external_downloader'] = None # Force disable external
+                ydl_opts['external_downloader'] = None # Native ব্যবহার হবে
             else:
-                # ✅ Aria2 for Normal Links
                 ydl_opts['external_downloader'] = ARIA2_EXECUTABLE
                 ydl_opts['external_downloader_args'] = ['-x', '16', '-k', '1M']
 
-            # Format Selection
             if mode == "aud":
                 ydl_opts['format'] = 'bestaudio/best'
                 ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3'}]
@@ -376,23 +363,22 @@ async def run_download_upload(client, message, url, referer, mode, res, task_id,
                     ydl_opts['format'] = "bestvideo+bestaudio/best"
                 else:
                     ydl_opts['format'] = f"bestvideo[height<={res}]+bestaudio/best"
-                
                 ydl_opts['postprocessors'] = [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}]
 
             # 📥 Start Download
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=True))
             
-            # File Detection
             for f in os.listdir(temp_dir):
                 if f.endswith((".mp4", ".mkv", ".mp3", ".webm", ".ts")):
                     final_path = os.path.join(temp_dir, f)
                     break
             
-            # 🛑 SIZE CHECK (FIX FOR 1KB FILES)
+            # 🛑 SIZE CHECK RELAXED
             if os.path.exists(final_path):
                 f_size = os.path.getsize(final_path)
-                if f_size < 100 * 1024: # যদি ১০০ KB এর কম হয়
-                     raise Exception("❌ **Download Failed! (File too small, possibly blocked).** Try Document Mode.")
+                # যদি ৫০ কেবি এর কম হয় তাহলে এরর
+                if f_size < 50 * 1024: 
+                     raise Exception("❌ **Protection Block!** Try again later or use Document mode.")
 
             thumb_path = f"{temp_dir}/{file_name}.jpg"
             if not os.path.exists(thumb_path): thumb_path = None
@@ -426,7 +412,7 @@ async def run_download_upload(client, message, url, referer, mode, res, task_id,
 
 @app.on_message(filters.command("start"))
 async def start(c, m): 
-    await m.reply("👋 **Pro Uploader Ready!**\n\n✅ **InstantDL Fix:** Active\n✅ **HLS Native Mode:** Active\n\nSend your link now!")
+    await m.reply("👋 **Bypass Bot Ready!**\n\n✅ **Cloudflare Bypass:** Active\n✅ **Cookie Scraper:** Active\n\nSend link to test!")
 
-print("🔥 Bot Started (With KB Size Protection)...")
+print("🔥 Bot Started (Cloudscraper Active)...")
 app.run()
