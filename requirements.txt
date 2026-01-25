@@ -6,3 +6,4 @@ beautifulsoup4
 imageio-ffmpeg
 aiohttp
 aria2
+cloudscraper
