@@ -13,9 +13,9 @@ import random
 from datetime import datetime
 
 # ==========================================
-# 🛠 ১. সিস্টেম ও ডিপেন্ডেন্সি সেটআপ (সব টুলস)
+# 🛠 ১. সিস্টেম ও ডিপেন্ডেন্সি (All Tools)
 # ==========================================
-print("⚙️ System Initializing (Ultimate Mode)...")
+print("⚙️ System Initializing (Final Fix)...")
 
 def install_and_import(package):
     try:
@@ -28,7 +28,7 @@ required_packages = ["pyrogram", "tgcrypto", "yt_dlp", "requests", "bs4", "image
 for pkg in required_packages:
     install_and_import(pkg)
 
-# 👇 Aria2c অটোমেটিক সেটআপ (Superfast Download এর জন্য)
+# Aria2c Setup
 ARIA2_BIN_PATH = os.path.join(os.getcwd(), "aria2c")
 
 def install_aria2_static():
@@ -66,6 +66,7 @@ import yt_dlp
 import imageio_ffmpeg
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from fake_useragent import UserAgent
 
 # ==========================================
 # ⚙️ কনফিগারেশন
@@ -77,13 +78,20 @@ API_HASH = "fd88d7339b0371eb2a9501d523f3e2a7"
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 
+# 🔥 হেডার জেনারেটর (ব্রাউজারের মতো আচরণ করবে)
 def get_headers(referer=None):
+    ua = UserAgent()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept': '*/*',
+        'User-Agent': ua.chrome,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Dest': 'document',
+        'Connection': 'keep-alive',
     }
-    if referer: headers['Referer'] = referer
+    if referer:
+        headers['Referer'] = referer
+        headers['Origin'] = referer.split('/')[0] + '//' + referer.split('/')[2]
     return headers
 
 try:
@@ -131,49 +139,50 @@ async def update_progress(message, percentage, current, total, speed, status_tex
     except: pass
 
 # ==========================================
-# 🕵️‍♂️ DEEP SCRAPER & URL DETECTOR
+# 🕵️‍♂️ ULTRA DEEP SCRAPER (Regex + Headers)
 # ==========================================
 def extract_stream_link(url):
     try:
-        # যদি ইউটিউব বা ফেসবুক হয়, সরাসরি রিটার্ন
-        if any(x in url for x in ["youtube.com", "youtu.be", "facebook.com"]):
-            return url, url
+        # ইউটিউব বা ডাইরেক্ট সাইট হলে স্কিপ
+        if any(x in url for x in ["youtube.com", "youtu.be", "facebook.com"]): return url, url
 
-        print(f"🕵️‍♂️ Deep Scanning: {url}")
+        print(f"🕵️‍♂️ Scanning: {url}")
         session = requests.Session()
-        session.headers.update(get_headers())
+        session.headers.update(get_headers(url))
         
-        r = session.get(url, timeout=15, allow_redirects=True)
+        r = session.get(url, timeout=20, allow_redirects=True)
         html = r.text
         
-        # Regex for m3u8, mp4
+        # Regex (More Powerful)
         patterns = [
             r'file:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
+            r'source:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
             r'src:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
             r'(https?://[^"\s]+\.m3u8[^"\s]*)', 
             r'file:\s*["\'](https?://[^"\']+\.mp4[^"\']*)["\']',
-            r'(https?://[^"\s]+\.mp4[^"\s]*)'
         ]
         
         for pattern in patterns:
             match = re.search(pattern, html)
             if match:
                 stream_url = match.group(1).replace('\\/', '/')
-                print(f"✅ Found: {stream_url}")
-                return stream_url, r.url 
+                print(f"✅ Found Hidden Stream: {stream_url}")
+                # যদি স্ট্রিম লিংক পাওয়া যায়, রেফারার হিসেবে মেইন পেজ ফেরত দেব
+                return stream_url, url 
         
-        return url, url 
-    except: return url, url
+        return url, url # কিছু না পেলে যা আছে তাই
+    except Exception as e:
+        print(f"⚠️ Scrape Error: {e}")
+        return url, url
 
 # ==========================================
-# 📨 মেইন হ্যান্ডলার (Resolution + Document)
+# 📨 মেইন হ্যান্ডলার
 # ==========================================
 @app.on_message(filters.text & ~filters.command(["start", "help"]))
 async def text_handler(client, message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Rename Check
     if chat_id in USER_STATE and USER_STATE[chat_id]['state'] == 'waiting_name':
         task_id = USER_STATE[chat_id]['task_id']
         custom_name = clean_filename(text)
@@ -193,11 +202,12 @@ async def text_handler(client, message):
     task_id = str(uuid.uuid4())[:8]
 
     try:
+        # ১. লিংক বের করা
         target_url, referer = await asyncio.to_thread(extract_stream_link, text)
         is_direct = False
         info = {}
-
-        # হেডারস
+        
+        # ২. হেডার সেট করা
         current_headers = get_headers(referer)
         
         ydl_opts = {
@@ -207,7 +217,7 @@ async def text_handler(client, message):
             'http_headers': current_headers,
         }
 
-        # Info Extract
+        # ৩. ইনফো বের করার চেষ্টা
         try:
             info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(target_url, download=False))
         except:
@@ -219,7 +229,7 @@ async def text_handler(client, message):
         
         buttons = []
         
-        # 🟢 রেজোলিউশন বাটন লজিক (Video Mode)
+        # ৪. কোয়ালিটি বাটন
         if not is_direct and formats:
             resolutions = sorted(list(set([f.get('height') for f in formats if f.get('height')])), reverse=True)
             if resolutions:
@@ -229,10 +239,10 @@ async def text_handler(client, message):
                     if len(row) == 3: buttons.append(row); row = []
                 if row: buttons.append(row)
         
-        # 🔵 অন্যান্য অপশন
+        # ৫. কন্ট্রোল বাটন
         ctrl_buttons = [
-            [InlineKeyboardButton("🎬 Best Video (Auto)", callback_data=f"q_{task_id}_vid_best")],
-            [InlineKeyboardButton("📁 Document (No Corrupt)", callback_data=f"q_{task_id}_doc_best")],
+            [InlineKeyboardButton("🎬 Download Video (Auto)", callback_data=f"q_{task_id}_vid_best")],
+            [InlineKeyboardButton("📁 Document (Safe Mode)", callback_data=f"q_{task_id}_doc_best")],
             [InlineKeyboardButton("🎵 Audio Only", callback_data=f"q_{task_id}_aud_0")],
             [InlineKeyboardButton("❌ Cancel", callback_data="close")]
         ]
@@ -243,7 +253,7 @@ async def text_handler(client, message):
         await status_msg.edit(
             f"📂 **Found:** `{title[:60]}`\n"
             f"🔗 **Source:** `{target_url[:40]}...`\n"
-            f"✨ **Choose Quality / Format:**", 
+            f"✨ **Note:** If video fails, try Document mode.", 
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
@@ -284,7 +294,7 @@ async def callback_handler(client, query: CallbackQuery):
         asyncio.create_task(run_download_upload(client, query.message, info['url'], info['referer'], info['mode'], info['res'], task_id, None))
 
 # ==========================================
-# 🚀 ULTIMATE DOWNLOAD ENGINE (Direct + HLS + Aria2)
+# 🚀 ULTIMATE DOWNLOAD ENGINE (Force Fix)
 # ==========================================
 def yt_dlp_hook(d, message, client, task_id):
     if d['status'] == 'downloading':
@@ -321,98 +331,79 @@ async def run_download_upload(client, message, url, referer, mode, res, task_id,
         thumb_path = None
         duration = 0
 
+        # 🔥 হেডার এবং রেফারার খুবই গুরুত্বপূর্ণ এই সাইটগুলোর জন্য
         dl_headers = get_headers(referer)
 
         try:
-            # ✅ ১. Direct Link Handling (Fastest for MP4/MKV)
-            # যদি লিংক .mp4 হয় এবং মোড 'vid' বা 'doc' হয়
-            if url.endswith((".mp4", ".mkv")) and "m3u8" not in url:
-                 await message.edit("⬇️ **Direct Downloading (High Speed)...**")
-                 final_path = f"{temp_dir}/{file_name}.mp4"
-                 
-                 async with aiohttp.ClientSession(headers=dl_headers) as session:
-                    async with session.get(url) as response:
-                        total_size = int(response.headers.get('content-length', 0))
-                        downloaded = 0
-                        start_time = time.time()
-                        with open(final_path, 'wb') as f:
-                            async for chunk in response.content.iter_chunked(1024 * 1024):
-                                if CANCEL_EVENTS.get(task_id): raise Exception("CANCELLED")
-                                f.write(chunk)
-                                downloaded += len(chunk)
-                                now = time.time()
-                                if (now - LAST_UPDATE_TIME.get(task_id, 0)) >= 4:
-                                    LAST_UPDATE_TIME[task_id] = now
-                                    pct = downloaded * 100 / total_size if total_size else 0
-                                    spd = downloaded / (now - start_time) if (now - start_time) > 0 else 0
-                                    await update_progress(message, pct, downloaded, total_size, spd, "⬇️ Direct...")
+            await message.edit("🚀 **Engine Starting (Protected Mode)...**")
+            out_templ = f"{temp_dir}/{file_name}.%(ext)s"
+            
+            ydl_opts = {
+                'outtmpl': out_templ,
+                'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
+                'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
+                'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
+                'http_headers': dl_headers, # ✅ Correct Headers passed
+                'progress_hooks': [lambda d: yt_dlp_hook(d, message, client, task_id)],
+                'socket_timeout': 60,
+                'retries': 20,
+            }
 
+            # 🛑 IMPORTANT FIX: Aria2 Disable for Problematic Links
+            # আপনার লিংকে "player.php" বা "m3u8" থাকলে Aria2 ব্যবহার করব না।
+            # কারণ Aria2 কুকি বা হেডার ঠিকমতো পাস করতে পারে না HLS এর ক্ষেত্রে।
+            is_problematic = "m3u8" in url or "player.php" in url or "instantdl" in url
+
+            if is_problematic:
+                # ✅ Native Downloader (Slow but 100% working)
+                ydl_opts['hls_prefer_native'] = True
+                ydl_opts['hls_use_mpegts'] = True
+                ydl_opts['external_downloader'] = None # Force disable external
             else:
-                # ✅ ২. YT-DLP Engine (Adaptive)
-                await message.edit("🚀 **Engine Starting...**")
-                out_templ = f"{temp_dir}/{file_name}.%(ext)s"
-                
-                ydl_opts = {
-                    'outtmpl': out_templ,
-                    'quiet': True, 'nocheckcertificate': True, 'writethumbnail': True,
-                    'cookiefile': COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-                    'ffmpeg_location': os.path.dirname(FFMPEG_LOCATION),
-                    'http_headers': dl_headers,
-                    'progress_hooks': [lambda d: yt_dlp_hook(d, message, client, task_id)],
-                    'socket_timeout': 30,
-                    'retries': 10,
-                }
+                # ✅ Aria2 for Normal Links
+                ydl_opts['external_downloader'] = ARIA2_EXECUTABLE
+                ydl_opts['external_downloader_args'] = ['-x', '16', '-k', '1M']
 
-                # 🔥 CRITICAL: HLS (m3u8) ফিক্স
-                if "m3u8" in url:
-                    # Aria2 ব্যবহার করলে HLS করাপ্ট হয়, তাই Native ব্যবহার করব
-                    ydl_opts['hls_prefer_native'] = True
-                    ydl_opts['hls_use_mpegts'] = True # TS কন্টেইনারে ডাউনলোড হবে (করাপশন কম হয়)
+            # Format Selection
+            if mode == "aud":
+                ydl_opts['format'] = 'bestaudio/best'
+                ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3'}]
+            elif mode == "doc":
+                ydl_opts['format'] = 'bestvideo+bestaudio/best'
+                ydl_opts['keepvideo'] = True
+            else:
+                if res == "best":
+                    ydl_opts['format'] = "bestvideo+bestaudio/best"
                 else:
-                    # বাকি সব ক্ষেত্রে Aria2 (Superfast)
-                    ydl_opts['external_downloader'] = ARIA2_EXECUTABLE
-                    ydl_opts['external_downloader_args'] = ['-x', '16', '-k', '1M']
+                    ydl_opts['format'] = f"bestvideo[height<={res}]+bestaudio/best"
+                
+                ydl_opts['postprocessors'] = [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}]
 
-                # 🎛️ ফরম্যাট সিলেকশন লজিক
-                if mode == "aud":
-                    ydl_opts['format'] = 'bestaudio/best'
-                    ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3'}]
-                
-                elif mode == "doc":
-                    # ডকুমেন্ট হলে কোন কনভার্সন নাই, শুধু ডাউনলোড
-                    ydl_opts['format'] = 'bestvideo+bestaudio/best'
-                    ydl_opts['keepvideo'] = True
-                
-                else: # Video Mode
-                    if res == "best":
-                        ydl_opts['format'] = "bestvideo+bestaudio/best"
-                    else:
-                        ydl_opts['format'] = f"bestvideo[height<={res}]+bestaudio/best"
-                    
-                    ydl_opts['postprocessors'] = [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}]
+            # 📥 Start Download
+            info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=True))
+            
+            # File Detection
+            for f in os.listdir(temp_dir):
+                if f.endswith((".mp4", ".mkv", ".mp3", ".webm", ".ts")):
+                    final_path = os.path.join(temp_dir, f)
+                    break
+            
+            # 🛑 SIZE CHECK (FIX FOR 1KB FILES)
+            if os.path.exists(final_path):
+                f_size = os.path.getsize(final_path)
+                if f_size < 100 * 1024: # যদি ১০০ KB এর কম হয়
+                     raise Exception("❌ **Download Failed! (File too small, possibly blocked).** Try Document Mode.")
 
-                # রান ডাউনলোড
-                info = await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(url, download=True))
-                
-                # ফাইল খোঁজা
-                for f in os.listdir(temp_dir):
-                    if f.endswith((".mp4", ".mkv", ".mp3", ".webm", ".ts")):
-                        final_path = os.path.join(temp_dir, f)
-                        break
-                
-                thumb_path = f"{temp_dir}/{file_name}.jpg"
-                if not os.path.exists(thumb_path): thumb_path = None
-                duration = int(info.get('duration', 0))
-
-            # ফাইল চেক
-            if not os.path.exists(final_path): raise Exception("Download Failed!")
+            thumb_path = f"{temp_dir}/{file_name}.jpg"
+            if not os.path.exists(thumb_path): thumb_path = None
+            duration = int(info.get('duration', 0))
             file_size = os.path.getsize(final_path)
 
             if file_size > 2 * 1024 * 1024 * 1024:
                 await message.edit("❌ **File > 2GB (Telegram Limit).**")
                 return
 
-            # 📤 আপলোড ফেজ
+            # 📤 Uploading
             await message.edit(f"⬆️ **Uploading ({mode.upper()})...**")
             start_time = time.time()
             caption = f"📁 **{file_name}**\n💾 Size: {human_readable_size(file_size)}"
@@ -420,24 +411,22 @@ async def run_download_upload(client, message, url, referer, mode, res, task_id,
             if mode == "aud": 
                 await client.send_audio(message.chat.id, final_path, caption=caption, thumb=thumb_path, duration=duration, progress=upload_hook, progress_args=(message, start_time, task_id))
             elif mode == "doc":
-                # ডকুমেন্ট হিসেবে ফোর্স আপলোড
                 await client.send_document(message.chat.id, final_path, caption=caption, thumb=thumb_path, force_document=True, progress=upload_hook, progress_args=(message, start_time, task_id))
             else: 
-                # ভিডিও হিসেবে আপলোড
                 await client.send_video(message.chat.id, final_path, caption=caption, thumb=thumb_path, duration=duration, supports_streaming=True, progress=upload_hook, progress_args=(message, start_time, task_id))
             
             await message.delete()
 
         except Exception as e:
             if "CANCELLED" in str(e): await message.edit("⛔ **Cancelled!**")
-            else: logger.error(e); await message.edit(f"❌ **Error:** `{str(e)[:100]}`")
+            else: logger.error(e); await message.edit(f"❌ **Error:** `{str(e)[:150]}`")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
             TASK_STORE.pop(task_id, None); CANCEL_EVENTS.pop(task_id, None)
 
 @app.on_message(filters.command("start"))
 async def start(c, m): 
-    await m.reply("👋 **Ultimate Uploader Ready!**\n\n✅ Resolution Selector: ON\n✅ Document Mode: ON\n✅ HLS/Stream Fix: ON\n✅ Aria2 Engine: ON")
+    await m.reply("👋 **Pro Uploader Ready!**\n\n✅ **InstantDL Fix:** Active\n✅ **HLS Native Mode:** Active\n\nSend your link now!")
 
-print("🔥 Bot Started (Full Feature Mode)...")
+print("🔥 Bot Started (With KB Size Protection)...")
 app.run()
