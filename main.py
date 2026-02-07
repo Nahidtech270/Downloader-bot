@@ -86,9 +86,9 @@ ARIA2_EXECUTABLE = install_aria2_static()
 # ==========================================
 # ⚙️ ৩. বট কনফিগারেশন
 # ==========================================
-BOT_TOKEN = "7849157640:AAFyGM8F-Yk7tqH2A_vOfVGqMx6bXPq-pTI"
-API_ID = 22697010
-API_HASH = "fd88d7339b0371eb2a9501d523f3e2a7"
+BOT_TOKEN = "7671188399:AAHDUsNWxGBT7HmzAb68LDV8UugM9aC9WOU"
+API_ID = 28870226
+API_HASH = "a5b1ff3f75941649bf5bc159782f0f00"
 
 DOWNLOAD_FOLDER = "downloads"
 
