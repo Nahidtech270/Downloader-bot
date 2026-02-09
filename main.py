@@ -13,7 +13,7 @@ import random
 import json
 from urllib.parse import urljoin
 from datetime import datetime
-from aiohttp import web  # Render Port Fix এর জন্য জরুরি
+from aiohttp import web
 
 # ==========================================
 # 🛠 ১. সিস্টেম ও ডিপেন্ডেন্সি
@@ -85,7 +85,6 @@ ARIA2_EXECUTABLE = install_aria2_static()
 # ==========================================
 # ⚙️ ৩. বট কনফিগারেশন
 # ==========================================
-# ⚠️ নিরাপত্তা টিপস: এই টোকেনগুলো Render এর Environment Variable এ রাখাই ভালো
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "7671188399:AAHDUsNWxGBT7HmzAb68LDV8UugM9aC9WOU")
 API_ID = int(os.environ.get("API_ID", 28870226))
 API_HASH = os.environ.get("API_HASH", "a5b1ff3f75941649bf5bc159782f0f00")
@@ -100,7 +99,7 @@ app = Client(
     in_memory=True, 
     workers=20, 
     max_concurrent_transmissions=10,
-    ipv6=False # অনেক সময় Render এ IPv6 সমস্যা করে, তাই False দেওয়া হলো
+    ipv6=False 
 )
 
 MAX_CONCURRENT_DOWNLOADS = 5
@@ -116,18 +115,13 @@ logger = logging.getLogger("FinalBot")
 if not os.path.exists(DOWNLOAD_FOLDER): os.makedirs(DOWNLOAD_FOLDER)
 
 # ==========================================
-# 🌐 Render Web Server (The Fix)
+# 🌐 Render Web Server Routes
 # ==========================================
 routes = web.RouteTableDef()
 
 @routes.get("/", allow_head=True)
 async def root_route_handler(request):
     return web.Response(text="✅ Bot is Running on Render!")
-
-async def web_server():
-    web_app = web.Application(client_max_size=30000000)
-    web_app.add_routes(routes)
-    return web_app
 
 # ==========================================
 # 🛠 ৪. হেল্পার ফাংশন
@@ -405,29 +399,35 @@ async def run_download_upload(client, message, task_info, task_id, custom_name):
 
 @app.on_message(filters.command("start"))
 async def start(c, m): 
-    await m.reply("👋 **Final Fixed Bot!**\n\n✅ Render Web Server: ON\n✅ Auto-Restart: ON")
+    await m.reply("👋 **Final Fixed Bot!**\n\n✅ Render Web Server: ON\n✅ Async Fix: Applied")
 
 # ==========================================
-# 🔥 ৮. ফাইনাল এক্সিকিউশন (Render Fix)
+# 🔥 ৮. ফাইনাল এক্সিকিউশন (Corrected for asyncio)
 # ==========================================
 if __name__ == "__main__":
     print("🔥 Starting Bot + Web Server for Render...")
-    
-    # পোর্ট সেটআপ (Render Environment থেকে)
     PORT = int(os.environ.get("PORT", 8080))
     
+    async def main_process():
+        # ১. ওয়েব সার্ভার সেটআপ
+        web_app = web.Application()
+        web_app.add_routes(routes)
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", PORT)
+        await site.start()
+        print(f"✅ Web Server running on Port: {PORT}")
+        
+        # ২. বট স্টার্ট
+        await app.start()
+        print("✅ Telegram Bot Started")
+        
+        # ৩. সিস্টেম চালু রাখা
+        await idle()
+        
+        # ৪. বন্ধ করার সময়
+        await app.stop()
+        print("🛑 Bot Stopped")
+
     loop = asyncio.get_event_loop()
-    
-    # 1. Start Bot
-    loop.run_until_complete(app.start())
-    
-    # 2. Start Web Server
-    app_run = web.AppRunner(loop.run_until_complete(web_server()))
-    loop.run_until_complete(app_run.setup())
-    site = web.TCPSite(app_run, "0.0.0.0", PORT)
-    loop.run_until_complete(site.start())
-    
-    print(f"✅ Web Server running on Port: {PORT}")
-    
-    # 3. Keep Alive
-    loop.run_until_complete(idle())
+    loop.run_until_complete(main_process())
