@@ -2,5 +2,8 @@ pyrogram
 tgcrypto
 yt-dlp
 requests
+beautifulsoup4
+imageio-ffmpeg
 aiohttp
+fake-useragent
 cloudscraper
