@@ -85,7 +85,7 @@ ARIA2_EXECUTABLE = install_aria2_static()
 # ==========================================
 # ⚙️ ৩. বট কনফিগারেশন
 # ==========================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7671188399:AAHDUsNWxGBT7HmzAb68LDV8UugM9aC9WOU")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8464633052:AAEaO33QeUy14LM7yNVSUvbH6uxtYkwvE7k")
 API_ID = int(os.environ.get("API_ID", 28870226))
 API_HASH = os.environ.get("API_HASH", "a5b1ff3f75941649bf5bc159782f0f00")
 
