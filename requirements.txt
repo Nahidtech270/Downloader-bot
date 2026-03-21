@@ -5,5 +5,5 @@ requests
 beautifulsoup4
 imageio-ffmpeg
 aiohttp
-aria2
+fake-useragent
 cloudscraper
